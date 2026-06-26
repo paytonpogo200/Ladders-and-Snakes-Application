@@ -34,7 +34,6 @@ export default function CharacterManager({ profile }: { profile: Profile }) {
     class_key: DEFAULT_CLASS.key,
     owner_user_id: '',
     level: 1,
-    notes: '',
     token_color: DEFAULT_TOKEN_COLOR
   });
 
@@ -101,7 +100,7 @@ export default function CharacterManager({ profile }: { profile: Profile }) {
         current_hp: preset.health,
         max_mana: preset.mana,
         current_mana: preset.mana,
-        notes: form.notes.trim(),
+        notes: '',
         token_color: form.token_color,
         attributes: preset.attributes,
         location_id: defaultLocation?.id ?? null
@@ -111,7 +110,7 @@ export default function CharacterManager({ profile }: { profile: Profile }) {
 
     setCreating(false);
     if (!error && data) {
-      setForm({ name: '', class_key: DEFAULT_CLASS.key, owner_user_id: '', level: 1, notes: '', token_color: DEFAULT_TOKEN_COLOR });
+      setForm({ name: '', class_key: DEFAULT_CLASS.key, owner_user_id: '', level: 1, token_color: DEFAULT_TOKEN_COLOR });
       setShowCreator(false);
       setOpenId(data.id);
       await loadData();
@@ -204,7 +203,7 @@ export default function CharacterManager({ profile }: { profile: Profile }) {
         </div>
         {false && isDm && (
           <form onSubmit={createLocation} className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto]">
-            <label>
+            <label className="hidden">
               <span className="mb-1 block text-[10px] font-black uppercase tracking-wider text-[var(--muted)]">Add party location</span>
               <input className="field py-2.5" value={newLocationName} onChange={(event) => setNewLocationName(event.target.value)} placeholder="New city, camp, dungeon…" />
             </label>
@@ -221,7 +220,7 @@ export default function CharacterManager({ profile }: { profile: Profile }) {
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <label>
+            <label className="hidden">
               <span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-[var(--muted)]">Character name</span>
               <input className="field" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="E.g. Seraphine Vale" />
             </label>
@@ -287,10 +286,10 @@ export default function CharacterManager({ profile }: { profile: Profile }) {
             </div>
           </section>
 
-          <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_22rem]">
-            <label>
+          <div className="mt-4 grid gap-3 lg:grid-cols-[22rem]">
+            <label className="hidden">
               <span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-[var(--muted)]">Notes</span>
-              <textarea className="field min-h-24" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Background, starting traits, player notes…" />
+              <textarea className="field min-h-24" value="" onChange={() => undefined} placeholder="Background, starting traits, player notes…" />
             </label>
             <div className="surface-soft rounded-xl p-3">
               <span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-[var(--muted)]">Token color</span>

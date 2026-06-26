@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Box, Check, FlaskConical, PackageOpen, Plus, ScrollText, Send, Shield, Sword, Trash2, Wrench, X } from 'lucide-react';
+import { AlertTriangle, Box, Check, ChevronDown, FlaskConical, PackageOpen, Plus, ScrollText, Send, Shield, Sword, Trash2, Wrench, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import NumberInput from '@/components/NumberInput';
 import Modal from '@/components/Modal';
@@ -37,6 +37,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
   const [busy, setBusy] = useState(false);
   const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
   const [dragTargetKey, setDragTargetKey] = useState<string | null>(null);
+  const [openStorageIds, setOpenStorageIds] = useState<Set<string>>(() => new Set());
   const dragTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragCandidate = useRef<{ item: InventoryItem; x: number; y: number } | null>(null);
   const draggingItem = useRef<InventoryItem | null>(null);
@@ -61,6 +62,15 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
 
   function slotKey(slot: number, parentId: string | null) {
     return `${parentId ?? 'main'}:${slot}`;
+  }
+
+  function setStorageOpen(storageId: string, open: boolean) {
+    setOpenStorageIds((current) => {
+      const next = new Set(current);
+      if (open) next.add(storageId);
+      else next.delete(storageId);
+      return next;
+    });
   }
 
   function stopAutoScroll() {
@@ -297,15 +307,15 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
           if (suppressClick.current) return;
           item ? openItem(item) : openEmpty(slot, parentId);
         }}
-        className={`relative flex aspect-square min-h-16 flex-col items-center justify-center rounded-xl border p-2 text-center transition active:scale-95 ${
+        className={`inventory-slot relative flex aspect-square min-h-20 flex-col items-center justify-center rounded-xl border p-1.5 text-center transition active:scale-95 sm:min-h-16 sm:p-2 ${
           item ? rarityClass(item.rarity) : 'border-dashed border-[var(--line)] bg-black/10'
         } ${!item && !canEdit ? 'cursor-default' : ''} ${draggingItemId === item?.id ? 'inventory-slot-dragging' : ''} ${dragTargetKey === key ? 'inventory-slot-target' : ''}`}
       >
         <span className="absolute right-2 top-1.5 text-[9px] font-bold text-[var(--muted)]">{slot + 1}</span>
         {item ? (
           <>
-            <span className="text-[var(--brass)]"><ItemIcon type={item.item_type} /></span>
-            <span className="mt-1 line-clamp-2 text-[11px] font-black leading-tight">{item.item_name}</span>
+            <span className="inventory-slot-icon text-[var(--brass)]"><ItemIcon type={item.item_type} /></span>
+            <span className="inventory-item-name mt-1 w-full text-[10px] font-black leading-[1.08] sm:text-[11px]">{item.item_name}</span>
             <span className="mt-0.5 text-[10px] font-black text-[var(--muted)]">×{item.quantity}</span>
             {item.equipped && <span className="absolute bottom-1.5 right-1.5 rounded-full bg-[var(--teal)] p-0.5 text-[#07110e]"><Check size={9} /></span>}
           </>
@@ -334,15 +344,21 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
           ? Math.max(contents.length + 1, highestUsedSlot + 2, 1)
           : Math.max(1, storage.storage_capacity);
         return (
-          <section key={storage.id} className={`mt-4 rounded-2xl border border-[#63b5a538] bg-[#63b5a508] p-3 ${isBagOfHolding ? 'rarity-card rarity-mythical' : ''}`}>
-            <button onClick={() => openItem(storage)} className="mb-3 flex w-full items-center gap-3 text-left">
+          <details
+            key={storage.id}
+            className={`mt-4 rounded-2xl border border-[#63b5a538] bg-[#63b5a508] p-3 ${isBagOfHolding ? 'rarity-card rarity-mythical' : ''}`}
+            open={openStorageIds.has(storage.id)}
+            onToggle={(event) => setStorageOpen(storage.id, event.currentTarget.open)}
+          >
+            <summary className="mb-3 flex cursor-pointer list-none items-center gap-3 text-left">
               <span className="rounded-xl bg-[#63b5a518] p-2 text-[var(--teal)]"><PackageOpen size={18} /></span>
-              <span className="min-w-0 flex-1"><span className="block font-black">{storage.item_name}</span><span className="text-xs text-[var(--muted)]">{isBagOfHolding ? `∞ storage · ${contents.length} items` : `${contents.length}/${capacity} storage slots`}</span></span>
-            </button>
+              <span className="min-w-0 flex-1"><span className="block truncate font-black">{storage.item_name}</span><span className="text-xs text-[var(--muted)]">{isBagOfHolding ? `∞ storage · ${contents.length} items` : `${contents.length}/${capacity} storage slots`}</span></span>
+              <ChevronDown size={17} className={`shrink-0 text-[var(--muted)] transition ${openStorageIds.has(storage.id) ? 'rotate-180' : ''}`} />
+            </summary>
             <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
               {Array.from({ length: capacity }, (_, index) => renderSlot(contents.find((entry) => entry.slot_index === index), index, storage.id))}
             </div>
-          </section>
+          </details>
         );
       })}
 

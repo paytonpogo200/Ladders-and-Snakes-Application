@@ -75,7 +75,7 @@ export default function Dashboard({ profile, userEmail }: { profile: Profile; us
         </div>
       </header>
 
-      <section className={`mx-auto max-w-6xl px-4 py-4 ${activeBattle && !isDm ? 'pb-8' : isDm ? 'pb-48 sm:pb-32' : 'pb-32'}`}>
+      <section className={`mx-auto max-w-6xl px-4 py-4 ${activeBattle && !isDm ? 'pb-8' : isDm ? 'pb-28 sm:pb-32' : 'pb-32'}`}>
         {tab === 'battle' && <BattleRoom profile={profile} />}
         {tab === 'characters' && <CharacterManager profile={profile} />}
         {tab === 'cities' && <CitiesPanel profile={profile} />}
@@ -85,8 +85,8 @@ export default function Dashboard({ profile, userEmail }: { profile: Profile; us
         {tab === 'assets' && isDm && <AssetsManager profile={profile} />}
       </section>
 
-      {(!activeBattle || isDm) && <nav className="campaign-nav fixed bottom-0 left-0 right-0 z-50 border-t px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
-        <div className={`mx-auto grid gap-1 ${isDm ? 'max-w-6xl grid-cols-4 sm:grid-cols-7' : 'max-w-4xl grid-cols-5'}`}>
+      {(!activeBattle || isDm) && <nav className="campaign-nav fixed bottom-0 left-0 right-0 z-50 border-t px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:px-4 sm:pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pt-3">
+        <div className={isDm ? 'thin-scrollbar mx-auto flex max-w-6xl gap-1 overflow-x-auto sm:grid sm:grid-cols-7' : 'mx-auto grid max-w-4xl grid-cols-5 gap-1'}>
           {[
             { id: 'battle' as const, label: 'Battlefield', icon: Swords },
             { id: 'characters' as const, label: 'Characters', icon: BookOpen },
@@ -103,7 +103,7 @@ export default function Dashboard({ profile, userEmail }: { profile: Profile; us
             <button
               key={id}
               onClick={() => setTab(id)}
-              className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] font-black leading-tight transition sm:flex-row sm:px-3 sm:py-3 sm:text-sm ${
+              className={`flex ${isDm ? 'min-w-[4.6rem] sm:min-w-0' : 'min-w-0'} flex-col items-center justify-center gap-1 rounded-xl px-1 py-1.5 text-[9px] font-black leading-tight transition sm:flex-row sm:px-3 sm:py-3 sm:text-sm ${
                 tab === id ? 'bg-[var(--paper)] text-[#141915]' : 'text-[var(--muted)]'
               }`}
             >

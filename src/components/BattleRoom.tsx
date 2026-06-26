@@ -296,18 +296,20 @@ export default function BattleRoom({ profile }: { profile: Profile }) {
   }
 
   return (
-    <div className="space-y-4">
-      <BattleMap
-        battle={battle}
-        combatants={combatants}
-        profile={profile}
-        selectedId={selectedCombatantId}
-        onSelect={(id) => setSelectedCombatantId((current) => current === id ? null : id)}
-        onMove={moveCombatant}
-      />
+    <div className="flex flex-col gap-4">
+      <div className="order-1">
+        <BattleMap
+          battle={battle}
+          combatants={combatants}
+          profile={profile}
+          selectedId={selectedCombatantId}
+          onSelect={(id) => setSelectedCombatantId((current) => current === id ? null : id)}
+          onMove={moveCombatant}
+        />
+      </div>
 
       {isDm && (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="order-3 grid gap-4 lg:grid-cols-2">
           <section className="surface rounded-2xl p-4">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div><p className="eyebrow">DM controls</p><h3 className="font-black">{selectedCombatant?.characters?.name ?? 'Select a token'}</h3></div>
@@ -362,7 +364,7 @@ export default function BattleRoom({ profile }: { profile: Profile }) {
         </div>
       )}
 
-      <section className="surface rounded-2xl p-4">
+      <section className="order-2 surface rounded-2xl p-4">
         <div className="mb-3"><h3 className="font-black">Encounter Roster</h3></div>
         <div className="grid gap-2 sm:grid-cols-2">
           {combatants.map((entry) => {
@@ -412,7 +414,7 @@ export default function BattleRoom({ profile }: { profile: Profile }) {
       </section>
 
       {!isDm && selectedCombatant?.characters?.owner_user_id === profile.id && (
-        <section className="surface rounded-2xl p-4">
+        <section className="order-3 surface rounded-2xl p-4">
           <div className="mb-4">
             <p className="eyebrow">Combat loadout</p>
             <h3 className="mt-1 text-2xl font-black">{selectedCombatant.characters.name}</h3>

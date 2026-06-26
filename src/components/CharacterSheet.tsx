@@ -51,7 +51,6 @@ export default function CharacterSheet({
     current_mana: character.current_mana,
     inventory_slots: character.inventory_slots ?? 20,
     spell_slots: character.spell_slots ?? 0,
-    notes: character.notes,
     attributes
   });
   const [saving, setSaving] = useState(false);
@@ -142,7 +141,6 @@ export default function CharacterSheet({
         current_mana: Math.max(0, Number(form.current_mana) || 0),
         inventory_slots: Math.max(0, Math.min(100, Number(form.inventory_slots) || 0)),
         spell_slots: Math.max(0, Number(form.spell_slots) || 0),
-        notes: form.notes.trim(),
         attributes: form.attributes
       })
       .eq('id', character.id);
@@ -316,7 +314,7 @@ export default function CharacterSheet({
         ))}
       </section>
 
-      <section>
+      <section className="hidden">
         <div className="rule-title mb-3">
           <h4 className="text-sm font-black uppercase tracking-wider">Attributes & Skills</h4>
         </div>
@@ -358,12 +356,12 @@ export default function CharacterSheet({
         </section>
       )}
 
-      <section>
+      <section className="hidden">
         <div className="rule-title mb-3">
           <h4 className="text-sm font-black uppercase tracking-wider">Notes</h4>
         </div>
         {editing ? (
-          <textarea className="field min-h-24" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Backstory, conditions, reminders…" />
+          <textarea className="field min-h-24" value="" onChange={() => undefined} placeholder="Backstory, conditions, reminders…" />
         ) : (
           <p className="surface-soft min-h-16 rounded-xl p-3 text-sm leading-6 text-[var(--muted)]">{character.notes || 'No notes recorded.'}</p>
         )}

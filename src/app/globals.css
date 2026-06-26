@@ -308,10 +308,25 @@ body.inventory-drag-active {
   overscroll-behavior: contain;
 }
 
+.inventory-item-name {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.inventory-slot-icon svg {
+  height: 15px;
+  width: 15px;
+}
+
 .personal-scroll-editor {
   color: var(--paper);
-  font-family: Cambria, Georgia, 'Times New Roman', serif;
+  font-family: 'Segoe Print', 'Bradley Hand ITC', 'Lucida Handwriting', Cambria, Georgia, serif;
   font-size: 1.05rem;
+  font-weight: 560;
   letter-spacing: 0.01em;
   box-shadow: inset 0 1px rgba(255, 236, 199, 0.05), inset 0 0 38px rgba(0, 0, 0, 0.28);
 }
@@ -320,9 +335,20 @@ body.inventory-drag-active {
 .personal-scroll-editor h1,
 .personal-scroll-editor h2,
 .personal-scroll-editor h3 {
-  font-family: 'Old English Text MT', 'Blackadder ITC', 'UnifrakturMaguntia', Georgia, serif;
+  font-family: 'Blackadder ITC', 'Lucida Calligraphy', 'Old English Text MT', 'UnifrakturMaguntia', Georgia, serif;
   color: #f6dfaa;
   text-shadow: 0 2px 0 rgba(41, 19, 6, 0.9), 0 0 18px rgba(224, 166, 78, 0.22);
+}
+
+@media (min-width: 640px) {
+  .inventory-item-name {
+    -webkit-line-clamp: 2;
+  }
+
+  .inventory-slot-icon svg {
+    height: 19px;
+    width: 19px;
+  }
 }
 
 .personal-scroll-editor:focus {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { BookOpen, MoonStar, Plus, Sparkles, WandSparkles } from 'lucide-react';
+import { BookOpen, ChevronDown, MoonStar, Plus, Sparkles, WandSparkles } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { createDebouncedRefresh } from '@/lib/realtime';
 import type { Character, CharacterSpell, Spell } from '@/lib/types';
@@ -158,26 +158,31 @@ export default function SpellPanel({
         <h4 className="flex items-center gap-2 text-sm font-black uppercase tracking-wider"><WandSparkles size={16} /> Spellbook</h4>
       </div>
 
-      <div className="mb-2 flex items-center justify-end text-xs text-[var(--muted)]">
-        <span className="font-black">{knownSpells.filter((entry) => entry.prepared_slot !== null && entry.prepared_slot < character.spell_slots).length}/{character.spell_slots}</span>
-      </div>
-
-      <div className="grid gap-2 sm:grid-cols-2">
-        {prepared.map((entry, slot) => entry ? (
-          <SpellCard key={entry.id} entry={entry} slot={slot} />
-        ) : (
-          <div key={slot} className="flex min-h-28 items-center justify-center rounded-xl border border-dashed border-[var(--line)] bg-black/10 p-3 text-center">
-            <span><MoonStar className="mx-auto mb-2 text-[var(--muted)]" size={19} /><span className="text-xs font-black text-[var(--muted)]">Spell slot {slot + 1}</span></span>
-          </div>
-        ))}
-      </div>
+      <details className="surface-soft rounded-2xl">
+        <summary className="flex cursor-pointer list-none items-center gap-3 p-3">
+          <WandSparkles size={18} className="text-[var(--brass)]" />
+          <span className="flex-1 font-black">Prepared spells</span>
+          <span className="rounded-full border border-[var(--line)] px-2 py-1 text-[10px] font-black text-[var(--muted)]">{knownSpells.filter((entry) => entry.prepared_slot !== null && entry.prepared_slot < character.spell_slots).length}/{character.spell_slots}</span>
+          <ChevronDown size={17} className="text-[var(--muted)]" />
+        </summary>
+        <div className="grid gap-2 border-t border-[#e0a64e22] p-3 sm:grid-cols-2">
+          {prepared.map((entry, slot) => entry ? (
+            <SpellCard key={entry.id} entry={entry} slot={slot} />
+          ) : (
+            <div key={slot} className="flex min-h-28 items-center justify-center rounded-xl border border-dashed border-[var(--line)] bg-black/10 p-3 text-center">
+              <span><MoonStar className="mx-auto mb-2 text-[var(--muted)]" size={19} /><span className="text-xs font-black text-[var(--muted)]">Spell slot {slot + 1}</span></span>
+            </div>
+          ))}
+        </div>
+      </details>
 
       {dormant.length > 0 && (
-        <details className="surface-soft mt-4 rounded-2xl" open>
+        <details className="surface-soft mt-4 rounded-2xl">
           <summary className="flex cursor-pointer list-none items-center gap-3 p-3">
             <BookOpen size={18} className="text-[var(--brass)]" />
             <span className="flex-1 font-black">Dormant spells</span>
             <span className="rounded-full border border-[var(--line)] px-2 py-1 text-[10px] font-black text-[var(--muted)]">{dormant.length}</span>
+            <ChevronDown size={17} className="text-[var(--muted)]" />
           </summary>
           <div className="grid gap-2 border-t border-[#e0a64e22] p-3 sm:grid-cols-2">
             {dormant.map((entry) => <SpellCard key={entry.id} entry={entry} />)}

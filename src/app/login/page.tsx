@@ -35,10 +35,10 @@ export default async function LoginPage() {
         </div>
 
         <div className="mx-auto w-full max-w-md">
-          <div className="mb-7 lg:hidden">
+          <div className="mb-7 text-center lg:hidden">
             <p className="eyebrow mb-3">Ladders and Snakes Campaign Table</p>
             <h1 className="text-4xl font-black leading-tight tracking-[-0.035em]">Welcome! To the world of Arta Malanda.</h1>
-            <p className="mt-3 leading-6 text-[var(--muted)]">In a world gone bleak after the Dozen-Year War, what possibilities await?</p>
+            <p className="mx-auto mt-3 max-w-sm leading-6 text-[var(--muted)]">In a world gone bleak after the Dozen-Year War, what possibilities await?</p>
           </div>
           <AuthForm />
         </div>

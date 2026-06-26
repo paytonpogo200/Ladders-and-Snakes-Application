@@ -152,8 +152,8 @@ export default function BestiaryPanel({ profile }: { profile: Profile }) {
           <section className="surface rounded-2xl p-3">
             <div className="grid gap-2 sm:grid-cols-[1fr_13rem]">
               <label className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" size={16} />
-                <input className="field pl-10" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search known creatures…" />
+                <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[var(--muted)]" size={16} />
+                <input className="field pl-12" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search known creatures…" />
               </label>
               <select className="field" value={category} onChange={(event) => setCategory(event.target.value)}>
                 <option>All</option>

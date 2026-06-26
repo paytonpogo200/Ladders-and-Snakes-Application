@@ -296,10 +296,10 @@ export default function PersonalScroll({ profile }: { profile: Profile }) {
           )}
         </div>
 
-        <div ref={scrollRef} className="relative rounded-2xl border border-[#d1a85b35] bg-[#120904d9]">
+        <div ref={scrollRef} className="relative isolate overflow-hidden rounded-2xl border border-[#d1a85b35] bg-[#120904d9]">
           <div
             ref={editorRef}
-            className="personal-scroll-editor min-h-[62vh] p-4 text-base leading-7 outline-none sm:p-6"
+            className="personal-scroll-editor relative z-0 min-h-[62vh] p-4 text-base leading-7 outline-none sm:p-6"
             contentEditable={!stylusMode}
             suppressContentEditableWarning
             onInput={() => {
@@ -310,7 +310,7 @@ export default function PersonalScroll({ profile }: { profile: Profile }) {
           />
           <canvas
             ref={canvasRef}
-            className={`absolute inset-0 z-10 h-full w-full rounded-2xl ${stylusMode ? 'touch-none cursor-crosshair' : 'pointer-events-none'}`}
+            className={`absolute inset-0 z-[1] h-full w-full rounded-2xl ${stylusMode ? 'touch-none cursor-crosshair' : 'pointer-events-none'}`}
             onPointerDown={startDrawing}
             onPointerMove={moveDrawing}
             onPointerUp={finishDrawing}
