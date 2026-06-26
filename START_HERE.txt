@@ -1,0 +1,13 @@
+CAMPAIGN TOOL - START HERE
+
+This folder is the actual app folder. package.json should be directly visible beside this file.
+
+1) Open this exact folder in VS Code.
+2) Open .env.local and replace the two placeholder values with your Supabase Project URL and Publishable/Anon key.
+3) Open Terminal -> New Terminal.
+4) Run:
+   npm install
+   npm run dev
+5) Open http://localhost:3000
+
+If you see an npm error saying package.json is missing, you opened the wrong folder.
