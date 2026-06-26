@@ -32,7 +32,7 @@ body {
   margin: 0;
   background:
     linear-gradient(rgba(23, 10, 3, 0.54), rgba(23, 10, 3, 0.7)),
-    url('/images/calostrynn-map.png') center / cover no-repeat fixed;
+    url('/images/calostrynn-map.png') center / cover no-repeat scroll;
 }
 
 button,
@@ -64,7 +64,7 @@ textarea {
 
 .app-shell::before {
   content: '';
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;
@@ -109,7 +109,6 @@ h3,
     linear-gradient(145deg, rgba(56, 31, 15, 0.95), rgba(29, 15, 7, 0.96)),
     rgba(32, 17, 8, 0.95);
   box-shadow: 0 20px 55px rgba(20, 7, 1, 0.34), inset 0 1px rgba(255, 236, 199, 0.06);
-  backdrop-filter: blur(6px) saturate(0.9);
 }
 
 .surface-soft {

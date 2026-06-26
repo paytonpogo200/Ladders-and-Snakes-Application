@@ -7,6 +7,7 @@ import ExplorationGuide from '@/components/ExplorationGuide';
 import NumberInput from '@/components/NumberInput';
 import { DEFAULT_LOOT_ENTRIES, LOOT_BIOMES, LOOT_ROOM_TYPES } from '@/lib/lootPresets';
 import { rarityClass } from '@/lib/rarity';
+import { createDebouncedRefresh } from '@/lib/realtime';
 import type { Character, InventoryItemType, LootEntry, LootGeneratorConfig, LootPoolSize, LootRareRule, LootRollResult, LootRoomRule, Profile } from '@/lib/types';
 
 type ExplorationLootResult = LootRollResult & {
@@ -279,11 +280,15 @@ export default function ExplorationPanel({ profile }: { profile: Profile }) {
   useEffect(() => {
     if (profile.role !== 'dm') return;
     loadData();
+    const refreshExploration = createDebouncedRefresh(loadData, 220);
     const channel = supabase
       .channel('exploration-character-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'characters' }, loadData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'characters' }, refreshExploration)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      refreshExploration.cancel();
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   if (profile.role !== 'dm') return null;

@@ -5,6 +5,7 @@ import { ArrowRight, Bell, Check, Megaphone, MessageSquare, RefreshCw, Send, X }
 import { createClient } from '@/lib/supabase/client';
 import Modal from '@/components/Modal';
 import TradeModal from '@/components/TradeModal';
+import { createDebouncedRefresh } from '@/lib/realtime';
 import type {
   CampaignLocation,
   CampaignNotification,
@@ -69,13 +70,17 @@ export default function NotificationHub({ profile }: { profile: Profile }) {
 
   useEffect(() => {
     load();
+    const refreshNotifications = createDebouncedRefresh(load, 220);
     const channel = supabase.channel(`notification-hub-${profile.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_notifications' }, load)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_offers' }, load)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'item_transfer_requests' }, load)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'player_locations' }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_notifications', filter: `user_id=eq.${profile.id}` }, refreshNotifications)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_offers' }, refreshNotifications)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'item_transfer_requests' }, refreshNotifications)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'player_locations', filter: `user_id=eq.${profile.id}` }, refreshNotifications)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      refreshNotifications.cancel();
+      supabase.removeChannel(channel);
+    };
   }, [profile.id]);
 
   function characterName(id: string) {

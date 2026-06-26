@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Home, PawPrint, Save, Truck, Warehouse } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { createDebouncedRefresh } from '@/lib/realtime';
 import type { Character, CharacterProperty, Profile } from '@/lib/types';
 
 function PropertyIcon({ type }: { type: CharacterProperty['property_type'] }) {
@@ -35,11 +36,15 @@ export default function PropertyPanel({ character, profile, readOnly = false }: 
 
   useEffect(() => {
     loadProperties();
+    const refreshProperties = createDebouncedRefresh(loadProperties, 160);
     const channel = supabase
       .channel(`property-${character.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'character_properties', filter: `character_id=eq.${character.id}` }, loadProperties)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'character_properties', filter: `character_id=eq.${character.id}` }, refreshProperties)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      refreshProperties.cancel();
+      supabase.removeChannel(channel);
+    };
   }, [character.id]);
 
   async function renameProperty(property: CharacterProperty) {

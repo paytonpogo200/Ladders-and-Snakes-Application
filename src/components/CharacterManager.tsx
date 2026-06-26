@@ -11,6 +11,7 @@ import TradeModal from '@/components/TradeModal';
 import { CLASS_PRESETS, DEFAULT_CLASS, classAssetToPreset, getClassPreset } from '@/lib/classPresets';
 import { ATTRIBUTE_KEYS, ATTRIBUTE_LABELS, type CampaignLocation, type Character, type ClassAsset, type Profile } from '@/lib/types';
 import { signed } from '@/lib/format';
+import { createDebouncedRefresh } from '@/lib/realtime';
 
 const DEFAULT_TOKEN_COLOR = '#4d8f83';
 
@@ -67,12 +68,16 @@ export default function CharacterManager({ profile }: { profile: Profile }) {
 
   useEffect(() => {
     loadData();
+    const refreshLedger = createDebouncedRefresh(loadData, 220);
     const channel = supabase
       .channel('character-ledger-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'characters' }, loadData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_locations' }, loadData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'characters' }, refreshLedger)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_locations' }, refreshLedger)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      refreshLedger.cancel();
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   async function createCharacter(event: React.FormEvent<HTMLFormElement>) {

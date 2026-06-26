@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Crosshair, LocateFixed, Minus, Plus } from 'lucide-react';
 import { clamp, percent } from '@/lib/format';
 import type { Battle, Combatant, Profile } from '@/lib/types';
@@ -22,9 +22,33 @@ export default function BattleMap({ battle, combatants, profile, selectedId, onS
   const [zoom, setZoom] = useState(0.8);
   const [pan, setPan] = useState({ x: 16, y: 16 });
   const [drag, setDrag] = useState<{ id: number; x: number; y: number; baseX: number; baseY: number; moved: boolean } | null>(null);
+  const panFrame = useRef<number | null>(null);
+  const queuedPan = useRef<{ x: number; y: number } | null>(null);
+  const dragMoved = useRef(false);
   const size = useMemo(() => ({ width: battle.grid_width * CELL_SIZE, height: battle.grid_height * CELL_SIZE }), [battle]);
 
+  useEffect(() => {
+    return () => {
+      if (panFrame.current !== null) window.cancelAnimationFrame(panFrame.current);
+    };
+  }, []);
+
+  function schedulePan(nextPan: { x: number; y: number }) {
+    queuedPan.current = nextPan;
+    if (panFrame.current !== null) return;
+
+    panFrame.current = window.requestAnimationFrame(() => {
+      panFrame.current = null;
+      const next = queuedPan.current;
+      queuedPan.current = null;
+      if (next) setPan(next);
+    });
+  }
+
   function resetView() {
+    if (panFrame.current !== null) window.cancelAnimationFrame(panFrame.current);
+    panFrame.current = null;
+    queuedPan.current = null;
     setZoom(0.8);
     setPan({ x: 16, y: 16 });
   }
@@ -32,6 +56,7 @@ export default function BattleMap({ battle, combatants, profile, selectedId, onS
   function pointerDown(event: React.PointerEvent<HTMLDivElement>) {
     if ((event.target as HTMLElement).closest('[data-token]')) return;
     event.currentTarget.setPointerCapture(event.pointerId);
+    dragMoved.current = false;
     setDrag({ id: event.pointerId, x: event.clientX, y: event.clientY, baseX: pan.x, baseY: pan.y, moved: false });
   }
 
@@ -39,20 +64,23 @@ export default function BattleMap({ battle, combatants, profile, selectedId, onS
     if (!drag || drag.id !== event.pointerId) return;
     const dx = event.clientX - drag.x;
     const dy = event.clientY - drag.y;
-    setDrag({ ...drag, moved: drag.moved || Math.abs(dx) + Math.abs(dy) > 7 });
-    setPan({ x: drag.baseX + dx, y: drag.baseY + dy });
+    const moved = Math.abs(dx) + Math.abs(dy) > 7;
+    if (moved) dragMoved.current = true;
+    if (!drag.moved && moved) setDrag({ ...drag, moved: true });
+    schedulePan({ x: drag.baseX + dx, y: drag.baseY + dy });
   }
 
   function pointerUp(event: React.PointerEvent<HTMLDivElement>) {
     if (!drag || drag.id !== event.pointerId) return;
     const selected = combatants.find((entry) => entry.id === selectedId);
 
-    if (!drag.moved && isDm && selected && viewportRef.current) {
+    if (!drag.moved && !dragMoved.current && isDm && selected && viewportRef.current) {
       const rect = viewportRef.current.getBoundingClientRect();
       const x = Math.floor((event.clientX - rect.left - pan.x) / zoom / CELL_SIZE);
       const y = Math.floor((event.clientY - rect.top - pan.y) / zoom / CELL_SIZE);
       if (x >= 0 && x < battle.grid_width && y >= 0 && y < battle.grid_height) onMove(selected.id, x, y);
     }
+    dragMoved.current = false;
     setDrag(null);
   }
 
@@ -77,7 +105,10 @@ export default function BattleMap({ battle, combatants, profile, selectedId, onS
         onPointerDown={pointerDown}
         onPointerMove={pointerMove}
         onPointerUp={pointerUp}
-        onPointerCancel={() => setDrag(null)}
+        onPointerCancel={() => {
+          dragMoved.current = false;
+          setDrag(null);
+        }}
         onWheel={(event) => {
           if (!event.ctrlKey) return;
           event.preventDefault();
@@ -129,7 +160,7 @@ export default function BattleMap({ battle, combatants, profile, selectedId, onS
         </div>
 
         <div className="pointer-events-none absolute bottom-3 left-3 right-3 flex justify-center">
-          <div className="rounded-full border border-white/10 bg-[#0d1110dc] px-4 py-2 text-center text-[11px] font-bold text-[var(--muted)] backdrop-blur">
+          <div className="rounded-full border border-white/10 bg-[#0d1110f2] px-4 py-2 text-center text-[11px] font-bold text-[var(--muted)]">
             {isDm && selectedId ? <span className="flex items-center gap-2 text-[var(--brass)]"><Crosshair size={14} /> Tap a square to move · tap the token again to cancel</span> : 'Drag to move around the map · use controls to zoom'}
           </div>
         </div>

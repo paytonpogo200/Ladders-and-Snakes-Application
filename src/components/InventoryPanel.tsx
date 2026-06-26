@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import NumberInput from '@/components/NumberInput';
 import Modal from '@/components/Modal';
 import { rarityClass } from '@/lib/rarity';
+import { createDebouncedRefresh } from '@/lib/realtime';
 import type { Character, CharacterTransferCapacity, InventoryItem, InventoryItemType, Profile } from '@/lib/types';
 
 const itemTypes: { value: InventoryItemType; label: string; icon: typeof Box }[] = [
@@ -73,7 +74,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     stopAutoScroll();
     if (!direction) return;
     autoScrollDirection.current = direction;
-    autoScrollTimer.current = setInterval(() => window.scrollBy({ top: direction * 5, behavior: 'auto' }), 22);
+    autoScrollTimer.current = setInterval(() => window.scrollBy({ top: direction * 4, behavior: 'auto' }), 32);
   }
 
   function resetDrag() {
@@ -109,11 +110,15 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
   useEffect(() => {
     loadItems();
     loadTransferOptions();
+    const refreshItems = createDebouncedRefresh(loadItems, 120);
     const channel = supabase
       .channel(`inventory-${character.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_items', filter: `character_id=eq.${character.id}` }, loadItems)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_items', filter: `character_id=eq.${character.id}` }, refreshItems)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      refreshItems.cancel();
+      supabase.removeChannel(channel);
+    };
   }, [character.id]);
 
   useEffect(() => {

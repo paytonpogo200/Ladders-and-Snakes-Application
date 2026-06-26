@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Check, Inbox, Send, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { createDebouncedRefresh } from '@/lib/realtime';
 import type { Character, ItemTransferRequest, Profile } from '@/lib/types';
 
 export default function TransferInbox({ profile }: { profile: Profile }) {
@@ -24,11 +25,15 @@ export default function TransferInbox({ profile }: { profile: Profile }) {
 
   useEffect(() => {
     loadTransfers();
+    const refreshTransfers = createDebouncedRefresh(loadTransfers, 180);
     const channel = supabase
       .channel(`transfer-inbox-${profile.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'item_transfer_requests' }, loadTransfers)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'item_transfer_requests' }, refreshTransfers)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      refreshTransfers.cancel();
+      supabase.removeChannel(channel);
+    };
   }, [profile.id]);
 
   const incoming = requests.filter((request) => request.recipient_user_id === profile.id);

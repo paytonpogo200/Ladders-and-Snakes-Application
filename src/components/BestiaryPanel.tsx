@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { BookMarked, ChevronDown, Eye, EyeOff, Search, ShieldAlert } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { DEFAULT_ENEMY_ASSETS } from '@/lib/enemyPresets';
+import { createDebouncedRefresh } from '@/lib/realtime';
 import type { EnemyAsset, Profile } from '@/lib/types';
 
 export default function BestiaryPanel({ profile }: { profile: Profile }) {
@@ -44,11 +45,15 @@ export default function BestiaryPanel({ profile }: { profile: Profile }) {
 
   useEffect(() => {
     loadData();
+    const refreshBestiary = createDebouncedRefresh(loadData, 220);
     const channel = supabase
       .channel('bestiary-discovery-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'enemy_assets' }, loadData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'enemy_assets' }, refreshBestiary)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      refreshBestiary.cancel();
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   async function loadDefaults() {

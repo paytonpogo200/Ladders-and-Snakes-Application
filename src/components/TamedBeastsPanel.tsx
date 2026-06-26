@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import NumberInput from '@/components/NumberInput';
 import TokenColorPicker from '@/components/TokenColorPicker';
 import Modal from '@/components/Modal';
+import { createDebouncedRefresh } from '@/lib/realtime';
 import type { Character, Profile, TamedBeast } from '@/lib/types';
 
 export default function TamedBeastsPanel({ character, profile, readOnly = false }: { character: Character; profile: Profile; readOnly?: boolean }) {
@@ -28,11 +29,15 @@ export default function TamedBeastsPanel({ character, profile, readOnly = false 
 
   useEffect(() => {
     load();
+    const refreshBeasts = createDebouncedRefresh(load, 180);
     const channel = supabase.channel(`tamed-beasts-${character.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tamed_beasts' }, load)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'characters' }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tamed_beasts', filter: `beastmaster_character_id=eq.${character.id}` }, refreshBeasts)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'characters' }, refreshBeasts)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      refreshBeasts.cancel();
+      supabase.removeChannel(channel);
+    };
   }, [character.id]);
 
   async function toggle(beast: TamedBeast) {

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { MapPin, Plus, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import Modal from '@/components/Modal';
+import { createDebouncedRefresh } from '@/lib/realtime';
 import type { CampaignLocation, PlayerLocation, Profile } from '@/lib/types';
 
 export default function LocationManager({ profile }: { profile: Profile }) {
@@ -30,11 +31,15 @@ export default function LocationManager({ profile }: { profile: Profile }) {
 
   useEffect(() => {
     load();
+    const refreshLocations = createDebouncedRefresh(load, 220);
     const channel = supabase.channel('campaign-location-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'player_locations' }, load)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_locations' }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'player_locations' }, refreshLocations)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_locations' }, refreshLocations)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      refreshLocations.cancel();
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   function locationFor(userId: string) {

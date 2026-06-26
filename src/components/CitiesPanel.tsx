@@ -10,6 +10,7 @@ import BrewingGuide from '@/components/BrewingGuide';
 import HousePanel from '@/components/HousePanel';
 import NumberInput from '@/components/NumberInput';
 import Modal from '@/components/Modal';
+import { createDebouncedRefresh } from '@/lib/realtime';
 import type {
   CampaignLocation,
   Character,
@@ -92,15 +93,19 @@ export default function CitiesPanel({ profile }: { profile: Profile }) {
 
   useEffect(() => {
     loadData();
+    const refreshMarket = createDebouncedRefresh(loadData, 220);
     const channel = supabase
       .channel('city-market-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'cities' }, loadData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'city_vendors' }, loadData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'market_products' }, loadData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'character_wallets' }, loadData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'characters' }, loadData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cities' }, refreshMarket)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'city_vendors' }, refreshMarket)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'market_products' }, refreshMarket)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'character_wallets' }, refreshMarket)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'characters' }, refreshMarket)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      refreshMarket.cancel();
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   useEffect(() => {

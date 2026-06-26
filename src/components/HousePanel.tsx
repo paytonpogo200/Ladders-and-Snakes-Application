@@ -5,6 +5,7 @@ import { Home, LogIn, LogOut, PackageOpen, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import NumberInput from '@/components/NumberInput';
 import { rarityClass } from '@/lib/rarity';
+import { createDebouncedRefresh } from '@/lib/realtime';
 import type { Character, HouseInventoryItem, InventoryItem, PlayerHouse, Profile } from '@/lib/types';
 
 export default function HousePanel({
@@ -65,11 +66,15 @@ export default function HousePanel({
 
   useEffect(() => {
     if (!house) return;
+    const refreshHouse = createDebouncedRefresh(loadHouse, 160);
     const channel = supabase
       .channel(`house-${house.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'house_inventory_items', filter: `house_id=eq.${house.id}` }, loadHouse)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'house_inventory_items', filter: `house_id=eq.${house.id}` }, refreshHouse)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      refreshHouse.cancel();
+      supabase.removeChannel(channel);
+    };
   }, [house?.id]);
 
   const selectedHouseItem = houseItems.find((entry) => entry.id === selectedHouseItemId) ?? null;

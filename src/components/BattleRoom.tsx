@@ -10,6 +10,7 @@ import NumberInput from '@/components/NumberInput';
 import SpellPanel from '@/components/SpellPanel';
 import { DEFAULT_ENEMY_ASSETS, ENEMY_CATEGORIES } from '@/lib/enemyPresets';
 import { percent } from '@/lib/format';
+import { createDebouncedRefresh } from '@/lib/realtime';
 import type { Battle, Character, Combatant, EnemyAsset, Profile, TamedBeast } from '@/lib/types';
 
 type EnemyForm = {
@@ -97,15 +98,25 @@ export default function BattleRoom({ profile }: { profile: Profile }) {
     loadEnemyAssets();
     loadTamedBeasts();
     loadBattle();
+    const refreshCharacters = createDebouncedRefresh(loadCharacters, 180);
+    const refreshBattle = createDebouncedRefresh(loadBattle, 140);
+    const refreshEnemyAssets = createDebouncedRefresh(loadEnemyAssets, 240);
+    const refreshTamedBeasts = createDebouncedRefresh(loadTamedBeasts, 180);
     const channel = supabase
       .channel('battle-room-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'characters' }, loadCharacters)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'battles' }, loadBattle)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'combatants' }, loadBattle)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'enemy_assets' }, loadEnemyAssets)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tamed_beasts' }, loadTamedBeasts)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'characters' }, refreshCharacters)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'battles' }, refreshBattle)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'combatants' }, refreshBattle)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'enemy_assets' }, refreshEnemyAssets)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tamed_beasts' }, refreshTamedBeasts)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      refreshCharacters.cancel();
+      refreshBattle.cancel();
+      refreshEnemyAssets.cancel();
+      refreshTamedBeasts.cancel();
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   useEffect(() => {

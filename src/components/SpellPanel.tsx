@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { BookOpen, MoonStar, Plus, Sparkles, WandSparkles } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { createDebouncedRefresh } from '@/lib/realtime';
 import type { Character, CharacterSpell, Spell } from '@/lib/types';
 
 export default function SpellPanel({
@@ -41,11 +42,15 @@ export default function SpellPanel({
 
   useEffect(() => {
     loadSpells();
+    const refreshSpells = createDebouncedRefresh(loadSpells, 160);
     const channel = supabase
       .channel(`character-spells-${character.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'character_spells', filter: `character_id=eq.${character.id}` }, loadSpells)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'character_spells', filter: `character_id=eq.${character.id}` }, refreshSpells)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      refreshSpells.cancel();
+      supabase.removeChannel(channel);
+    };
   }, [character.id]);
 
   const prepared = Array.from({ length: character.spell_slots }, (_, slot) =>

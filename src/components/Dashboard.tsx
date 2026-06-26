@@ -2,17 +2,29 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { BookOpen, Compass, Landmark, LogOut, PawPrint, ScrollText, Settings2, Shield, Swords } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import BattleRoom from '@/components/BattleRoom';
-import CharacterManager from '@/components/CharacterManager';
-import AssetsManager from '@/components/AssetsManager';
-import CitiesPanel from '@/components/CitiesPanel';
-import BestiaryPanel from '@/components/BestiaryPanel';
-import ExplorationPanel from '@/components/ExplorationPanel';
 import NotificationHub from '@/components/NotificationHub';
-import PersonalScroll from '@/components/PersonalScroll';
+import { createDebouncedRefresh } from '@/lib/realtime';
 import type { Profile } from '@/lib/types';
+
+function PanelLoading({ label }: { label: string }) {
+  return (
+    <section className="surface rounded-2xl p-5">
+      <p className="eyebrow">{label}</p>
+      <div className="mt-4 h-24 animate-pulse rounded-2xl bg-black/20" />
+    </section>
+  );
+}
+
+const BattleRoom = dynamic(() => import('@/components/BattleRoom'), { loading: () => <PanelLoading label="Battlefield" />, ssr: false });
+const CharacterManager = dynamic(() => import('@/components/CharacterManager'), { loading: () => <PanelLoading label="Characters" />, ssr: false });
+const CitiesPanel = dynamic(() => import('@/components/CitiesPanel'), { loading: () => <PanelLoading label="Discovered Cities" />, ssr: false });
+const BestiaryPanel = dynamic(() => import('@/components/BestiaryPanel'), { loading: () => <PanelLoading label="Bestiary" />, ssr: false });
+const ExplorationPanel = dynamic(() => import('@/components/ExplorationPanel'), { loading: () => <PanelLoading label="Exploration" />, ssr: false });
+const PersonalScroll = dynamic(() => import('@/components/PersonalScroll'), { loading: () => <PanelLoading label="Personal Scroll" />, ssr: false });
+const AssetsManager = dynamic(() => import('@/components/AssetsManager'), { loading: () => <PanelLoading label="Update Assets" />, ssr: false });
 
 export default function Dashboard({ profile, userEmail }: { profile: Profile; userEmail: string }) {
   const [tab, setTab] = useState<'battle' | 'characters' | 'cities' | 'bestiary' | 'exploration' | 'scroll' | 'assets'>('battle');
@@ -29,8 +41,12 @@ export default function Dashboard({ profile, userEmail }: { profile: Profile; us
       if (active && !isDm) setTab('battle');
     }
     checkBattle();
-    const channel = supabase.channel('dashboard-battle-lock').on('postgres_changes', { event: '*', schema: 'public', table: 'battles' }, checkBattle).subscribe();
-    return () => { supabase.removeChannel(channel); };
+    const refreshBattleLock = createDebouncedRefresh(checkBattle, 160);
+    const channel = supabase.channel('dashboard-battle-lock').on('postgres_changes', { event: '*', schema: 'public', table: 'battles' }, refreshBattleLock).subscribe();
+    return () => {
+      refreshBattleLock.cancel();
+      supabase.removeChannel(channel);
+    };
   }, [isDm, supabase]);
 
   async function signOut() {
@@ -41,7 +57,7 @@ export default function Dashboard({ profile, userEmail }: { profile: Profile; us
 
   return (
     <main className="app-shell min-h-screen text-[var(--paper)]">
-      <header className="campaign-header sticky top-0 z-40 border-b px-4 py-3 backdrop-blur-xl">
+      <header className="campaign-header sticky top-0 z-40 border-b px-4 py-3">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -69,7 +85,7 @@ export default function Dashboard({ profile, userEmail }: { profile: Profile; us
         {tab === 'assets' && isDm && <AssetsManager profile={profile} />}
       </section>
 
-      {(!activeBattle || isDm) && <nav className="campaign-nav fixed bottom-0 left-0 right-0 z-50 border-t px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl">
+      {(!activeBattle || isDm) && <nav className="campaign-nav fixed bottom-0 left-0 right-0 z-50 border-t px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
         <div className={`mx-auto grid gap-1 ${isDm ? 'max-w-6xl grid-cols-4 sm:grid-cols-7' : 'max-w-4xl grid-cols-5'}`}>
           {[
             { id: 'battle' as const, label: 'Battlefield', icon: Swords },
