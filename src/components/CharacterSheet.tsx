@@ -22,8 +22,26 @@ import {
   type CurrencySystem,
   type InventoryItemType,
   type MarketProduct,
-  type Profile
+  type Profile,
+  type Spell
 } from '@/lib/types';
+
+const grantItemTypes: { value: InventoryItemType; label: string }[] = [
+  { value: 'weapon', label: 'Weapon' },
+  { value: 'armor', label: 'Armor' },
+  { value: 'ore', label: 'Ore' },
+  { value: 'potion', label: 'Potion' },
+  { value: 'food', label: 'Food' },
+  { value: 'plant', label: 'Plant' },
+  { value: 'fabric', label: 'Fabric' },
+  { value: 'tool', label: 'Tool' },
+  { value: 'quest', label: 'Quest' },
+  { value: 'misc', label: 'Misc.' }
+];
+
+function imbueNotes(spellName: string) {
+  return spellName ? `Imbued spell: ${spellName}` : '';
+}
 
 export default function CharacterSheet({
   character,
@@ -59,11 +77,12 @@ export default function CharacterSheet({
   const [denominations, setDenominations] = useState<CurrencyDenomination[]>([]);
   const [wallets, setWallets] = useState<CharacterWallet[]>([]);
   const [products, setProducts] = useState<MarketProduct[]>([]);
+  const [spells, setSpells] = useState<Spell[]>([]);
   const [currencyForm, setCurrencyForm] = useState({ denomination_id: '', amount: 1 });
   const [grantMode, setGrantMode] = useState<'catalog' | 'custom'>('catalog');
   const [grantProductId, setGrantProductId] = useState('');
   const [grantCatalogQuantity, setGrantCatalogQuantity] = useState(1);
-  const [grantForm, setGrantForm] = useState({ name: '', quantity: 1, item_type: 'misc' as InventoryItemType, storage_capacity: 0 });
+  const [grantForm, setGrantForm] = useState({ name: '', quantity: 1, item_type: 'misc' as InventoryItemType, imbued_spell_id: '', storage_capacity: 0 });
   const [toolMessage, setToolMessage] = useState('');
 
   useEffect(() => {
@@ -73,8 +92,9 @@ export default function CharacterSheet({
       supabase.from('currency_systems').select('*'),
       supabase.from('currency_denominations').select('*').order('sort_order'),
       supabase.from('character_wallets').select('*').eq('character_id', character.id),
-      supabase.from('market_products').select('*').order('name')
-    ]).then(([classResult, systemsResult, denominationsResult, walletsResult, productsResult]) => {
+      supabase.from('market_products').select('*').order('name'),
+      supabase.from('spells').select('*').order('category').order('name')
+    ]).then(([classResult, systemsResult, denominationsResult, walletsResult, productsResult, spellResult]) => {
       if (classResult.data) setClassPreset(classAssetToPreset(classResult.data as ClassAsset));
       setCurrencySystems((systemsResult.data ?? []) as CurrencySystem[]);
       const loadedDenominations = (denominationsResult.data ?? []) as CurrencyDenomination[];
@@ -86,6 +106,7 @@ export default function CharacterSheet({
       const loadedProducts = (productsResult.data ?? []) as MarketProduct[];
       setProducts(loadedProducts);
       if (!grantProductId && loadedProducts[0]) setGrantProductId(loadedProducts[0].id);
+      setSpells((spellResult.data ?? []) as Spell[]);
     });
   }, [character.class_key]);
 
@@ -113,13 +134,13 @@ export default function CharacterSheet({
           target_character_id: character.id,
           item_name_input: grantForm.name.trim(),
           quantity_input: Number(grantForm.quantity) || 1,
-          notes_input: '',
+          notes_input: grantForm.item_type === 'weapon' ? imbueNotes(spells.find((spell) => spell.id === grantForm.imbued_spell_id)?.name ?? '') : '',
           item_type_input: grantForm.item_type,
           storage_capacity_input: Math.max(0, Number(grantForm.storage_capacity) || 0)
         });
     setToolMessage(result.error ? result.error.message : 'Item added to the character.');
     if (!result.error) {
-      setGrantForm({ name: '', quantity: 1, item_type: 'misc', storage_capacity: 0 });
+      setGrantForm({ name: '', quantity: 1, item_type: 'misc', imbued_spell_id: '', storage_capacity: 0 });
       onSaved();
     }
   }
@@ -282,9 +303,15 @@ export default function CharacterSheet({
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
               <input className="field sm:col-span-2" value={grantForm.name} onChange={(event) => setGrantForm({ ...grantForm, name: event.target.value })} placeholder="Custom item name" />
               <select className="field" value={grantForm.item_type} onChange={(event) => setGrantForm({ ...grantForm, item_type: event.target.value as InventoryItemType })}>
-                <option value="weapon">Weapon</option><option value="armor">Armor</option><option value="consumable">Consumable</option><option value="tool">Tool</option><option value="quest">Quest</option><option value="misc">Misc.</option>
+                {grantItemTypes.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}
               </select>
               <NumberInput className="field" min={1} value={grantForm.quantity} onValueChange={(quantity) => setGrantForm({ ...grantForm, quantity })} placeholder="Quantity" />
+              {grantForm.item_type === 'weapon' && spells.length > 0 && (
+                <select className="field sm:col-span-2" value={grantForm.imbued_spell_id} onChange={(event) => setGrantForm({ ...grantForm, imbued_spell_id: event.target.value })}>
+                  <option value="">No imbued spell</option>
+                  {spells.map((spell) => <option key={spell.id} value={spell.id}>{spell.category} · {spell.name}</option>)}
+                </select>
+              )}
               <NumberInput className="field" min={0} value={grantForm.storage_capacity} onValueChange={(storage_capacity) => setGrantForm({ ...grantForm, storage_capacity })} placeholder="Storage slots (0 = normal item)" />
             </div>
           )}

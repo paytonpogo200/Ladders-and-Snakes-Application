@@ -27,6 +27,8 @@ import {
 
 type ListingView = MarketListing & { products: MarketProduct | null };
 
+const STORE_ITEM_TYPES: InventoryItemType[] = ['weapon', 'armor', 'ore', 'potion', 'food', 'plant', 'fabric', 'tool', 'quest', 'misc'];
+
 function slug(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
@@ -419,7 +421,7 @@ export default function AssetsManager({ profile }: { profile: Profile }) {
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <label><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Name</span><input className="field" value={productDraft.name} onChange={(event) => setProductDraft({ ...productDraft, name: event.target.value })} /></label>
-              <label><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Item type</span><select className="field" value={productDraft.item_type} onChange={(event) => setProductDraft({ ...productDraft, item_type: event.target.value as InventoryItemType })}>{['weapon', 'armor', 'consumable', 'tool', 'quest', 'misc'].map((entry) => <option key={entry} value={entry}>{entry}</option>)}</select></label>
+              <label><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Item type</span><select className="field" value={productDraft.item_type} onChange={(event) => setProductDraft({ ...productDraft, item_type: event.target.value as InventoryItemType })}>{STORE_ITEM_TYPES.map((entry) => <option key={entry} value={entry}>{entry}</option>)}</select></label>
               <div className="grid grid-cols-[1fr_1fr] gap-2">
                 <label><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Price</span><NumberInput className="field" min={0} step="0.1" value={priceAmount} onValueChange={setPriceAmount} /></label>
                 <label><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Unit</span><select className="field" value={priceDenominationId} onChange={(event) => setPriceDenominationId(event.target.value)}>{cityDenominations.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>

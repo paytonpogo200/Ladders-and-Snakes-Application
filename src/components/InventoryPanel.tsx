@@ -1,25 +1,41 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Box, Check, ChevronDown, FlaskConical, PackageOpen, Plus, ScrollText, Send, Shield, Sword, Trash2, Wrench, X } from 'lucide-react';
+import { AlertTriangle, Apple, Box, Check, ChevronDown, FlaskConical, Leaf, PackageOpen, Pickaxe, Plus, ScrollText, Send, Shield, Shirt, Sword, Trash2, Wrench, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import NumberInput from '@/components/NumberInput';
 import Modal from '@/components/Modal';
 import { rarityClass } from '@/lib/rarity';
 import { createDebouncedRefresh } from '@/lib/realtime';
-import type { Character, CharacterTransferCapacity, InventoryItem, InventoryItemType, Profile } from '@/lib/types';
+import type { Character, CharacterTransferCapacity, InventoryItem, InventoryItemType, Profile, Spell } from '@/lib/types';
 
 const itemTypes: { value: InventoryItemType; label: string; icon: typeof Box }[] = [
   { value: 'weapon', label: 'Weapon', icon: Sword },
   { value: 'armor', label: 'Armor', icon: Shield },
-  { value: 'consumable', label: 'Consumable', icon: FlaskConical },
+  { value: 'ore', label: 'Ore', icon: Pickaxe },
+  { value: 'potion', label: 'Potion', icon: FlaskConical },
+  { value: 'food', label: 'Food', icon: Apple },
+  { value: 'plant', label: 'Plant', icon: Leaf },
+  { value: 'fabric', label: 'Fabric', icon: Shirt },
   { value: 'tool', label: 'Tool', icon: Wrench },
   { value: 'quest', label: 'Quest', icon: ScrollText },
   { value: 'misc', label: 'Misc.', icon: Box }
 ];
 
+const legacyItemTypes: { value: InventoryItemType; label: string; icon: typeof Box }[] = [
+  { value: 'consumable', label: 'Consumable', icon: FlaskConical }
+];
+
+function imbuedSpellName(notes?: string | null) {
+  return notes?.match(/Imbued spell:\s*(.+)/i)?.[1]?.trim() ?? '';
+}
+
+function imbueNotes(spellName: string) {
+  return spellName ? `Imbued spell: ${spellName}` : '';
+}
+
 function ItemIcon({ type, size = 19 }: { type: InventoryItemType; size?: number }) {
-  const Icon = itemTypes.find((entry) => entry.value === type)?.icon ?? Box;
+  const Icon = itemTypes.find((entry) => entry.value === type)?.icon ?? legacyItemTypes.find((entry) => entry.value === type)?.icon ?? Box;
   return <Icon size={size} />;
 }
 
@@ -32,6 +48,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
   const [message, setMessage] = useState('');
   const [characters, setCharacters] = useState<Character[]>([]);
   const [capacities, setCapacities] = useState<CharacterTransferCapacity[]>([]);
+  const [spells, setSpells] = useState<Spell[]>([]);
   const [transferTargetId, setTransferTargetId] = useState('');
   const [actionQuantity, setActionQuantity] = useState(1);
   const [busy, setBusy] = useState(false);
@@ -49,6 +66,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     item_name: '',
     quantity: 1,
     item_type: 'misc' as InventoryItemType,
+    imbued_spell_id: '',
     equipped: false,
     storage_capacity: 0
   });
@@ -105,9 +123,10 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
   }
 
   async function loadTransferOptions() {
-    const [characterResult, capacityResult] = await Promise.all([
+    const [characterResult, capacityResult, spellResult] = await Promise.all([
       supabase.from('characters').select('*').eq('kind', 'player').order('name'),
-      supabase.rpc('get_character_transfer_capacity')
+      supabase.rpc('get_character_transfer_capacity'),
+      supabase.from('spells').select('*').order('category').order('name')
     ]);
     if (!characterResult.error) {
       const loaded = ((characterResult.data ?? []) as Character[]).filter((entry) => entry.id !== character.id && entry.owner_user_id);
@@ -115,6 +134,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
       if (!transferTargetId && loaded[0]) setTransferTargetId(loaded[0].id);
     }
     if (!capacityResult.error) setCapacities((capacityResult.data ?? []) as CharacterTransferCapacity[]);
+    if (!spellResult.error) setSpells((spellResult.data ?? []) as Spell[]);
   }
 
   useEffect(() => {
@@ -214,6 +234,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
       item_name: item.item_name,
       quantity: item.quantity,
       item_type: item.item_type,
+      imbued_spell_id: spells.find((spell) => spell.name === imbuedSpellName(item.notes))?.id ?? '',
       equipped: item.equipped,
       storage_capacity: item.storage_capacity ?? 0
     });
@@ -225,7 +246,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     setEmptyTarget({ slot, parentId });
     setAction('inspect');
     setMessage('');
-    setForm({ item_name: '', quantity: 1, item_type: 'misc', equipped: false, storage_capacity: 0 });
+    setForm({ item_name: '', quantity: 1, item_type: 'misc', imbued_spell_id: '', equipped: false, storage_capacity: 0 });
   }
 
   function closeEditor() {
@@ -243,6 +264,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
       item_name: form.item_name.trim(),
       quantity: Math.max(1, Number(form.quantity) || 1),
       item_type: form.item_type,
+      notes: form.item_type === 'weapon' ? imbueNotes(spells.find((spell) => spell.id === form.imbued_spell_id)?.name ?? '') : '',
       equipped: form.equipped
     };
     const result = selectedItem
@@ -255,7 +277,6 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
           character_id: character.id,
           slot_index: emptyTarget?.slot ?? 0,
           parent_item_id: emptyTarget?.parentId ?? null,
-          notes: '',
           is_storage: false,
           storage_capacity: 0
         });
@@ -378,6 +399,15 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
                 <label className="sm:col-span-2"><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Item name</span><input className="field" required value={form.item_name} onChange={(e) => setForm({ ...form, item_name: e.target.value })} /></label>
                 <label><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Type</span><select className="field" value={form.item_type} onChange={(e) => setForm({ ...form, item_type: e.target.value as InventoryItemType })}>{itemTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label>
                 <label><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Quantity</span><NumberInput className="field" min={1} value={form.quantity} onValueChange={(quantity) => setForm({ ...form, quantity })} /></label>
+                {form.item_type === 'weapon' && spells.length > 0 && (
+                  <label className="sm:col-span-2">
+                    <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Imbued spell</span>
+                    <select className="field" value={form.imbued_spell_id} onChange={(event) => setForm({ ...form, imbued_spell_id: event.target.value })}>
+                      <option value="">No imbued spell</option>
+                      {spells.map((spell) => <option key={spell.id} value={spell.id}>{spell.category} · {spell.name}</option>)}
+                    </select>
+                  </label>
+                )}
                 {selectedItem?.is_storage && <label><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Storage slots</span><NumberInput className="field" min={1} max={500} value={form.storage_capacity} onValueChange={(storage_capacity) => setForm({ ...form, storage_capacity })} /></label>}
                 {!selectedItem?.is_storage && <button type="button" onClick={() => setForm({ ...form, equipped: !form.equipped })} className={`sm:col-span-2 flex items-center justify-between rounded-xl border p-3 text-sm font-bold ${form.equipped ? 'border-[var(--teal)] bg-[#63b5a510]' : 'border-[var(--line)]'}`}>Mark as equipped {form.equipped && <Check size={18} />}</button>}
               </div>
@@ -387,6 +417,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
               <div className="rounded-xl border border-[var(--line)] bg-black/20 p-4 text-center">
                 <ItemIcon type={selectedItem.item_type} size={26} />
                 <p className="mt-2 font-black">{selectedItem.item_type}</p>
+                {selectedItem.item_type === 'weapon' && imbuedSpellName(selectedItem.notes) && <p className="mt-1 text-sm font-bold text-[var(--brass)]">Imbued: {imbuedSpellName(selectedItem.notes)}</p>}
                 <p className="text-sm text-[var(--muted)]">Quantity: {selectedItem.quantity}{selectedItem.is_storage ? ` · ${selectedItem.storage_capacity} storage slots` : ''}</p>
               </div>
             )}

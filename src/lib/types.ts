@@ -1,7 +1,7 @@
 export type UserRole = 'player' | 'dm';
 export type CharacterKind = 'player' | 'enemy' | 'npc';
 export type BattleStatus = 'active' | 'ended';
-export type InventoryItemType = 'weapon' | 'armor' | 'consumable' | 'tool' | 'quest' | 'misc';
+export type InventoryItemType = 'weapon' | 'armor' | 'consumable' | 'ore' | 'potion' | 'food' | 'plant' | 'fabric' | 'tool' | 'quest' | 'misc';
 
 export type ClassAsset = {
   id?: string;
