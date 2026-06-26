@@ -51,6 +51,7 @@ export default function CharacterSheet({
     current_mana: character.current_mana,
     inventory_slots: character.inventory_slots ?? 20,
     spell_slots: character.spell_slots ?? 0,
+    personal_passives: character.notes ?? '',
     attributes
   });
   const [saving, setSaving] = useState(false);
@@ -141,6 +142,7 @@ export default function CharacterSheet({
         current_mana: Math.max(0, Number(form.current_mana) || 0),
         inventory_slots: Math.max(0, Math.min(100, Number(form.inventory_slots) || 0)),
         spell_slots: Math.max(0, Number(form.spell_slots) || 0),
+        notes: form.personal_passives.trim(),
         attributes: form.attributes
       })
       .eq('id', character.id);
@@ -153,6 +155,8 @@ export default function CharacterSheet({
   }
 
   const shownAttributes = editing ? form.attributes : attributes;
+  const personalPassives = (editing ? form.personal_passives : character.notes ?? '').trim();
+  const personalPassiveLines = personalPassives.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 
   return (
     <div className="mt-4 space-y-4 border-t border-white/[0.07] pt-4">
@@ -314,7 +318,7 @@ export default function CharacterSheet({
         ))}
       </section>
 
-      <section className="hidden">
+      <section>
         <div className="rule-title mb-3">
           <h4 className="text-sm font-black uppercase tracking-wider">Attributes & Skills</h4>
         </div>
@@ -352,6 +356,32 @@ export default function CharacterSheet({
                 </li>
               ))}
             </ul>
+          </div>
+        </section>
+      )}
+
+      {(editing || personalPassiveLines.length > 0) && (
+        <section>
+          <div className="rule-title mb-3">
+            <h4 className="text-sm font-black uppercase tracking-wider">Personal Passives</h4>
+          </div>
+          <div className="surface-soft rounded-xl p-3">
+            {editing ? (
+              <textarea
+                className="field min-h-24"
+                value={form.personal_passives}
+                onChange={(event) => setForm({ ...form, personal_passives: event.target.value })}
+                placeholder="Optional. One passive or ability per line."
+              />
+            ) : (
+              <ul className="space-y-2">
+                {personalPassiveLines.map((passive) => (
+                  <li key={passive} className="flex gap-2 text-xs leading-5 text-[var(--muted)]">
+                    <span className="text-[var(--teal)]">◆</span>{passive}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </section>
       )}

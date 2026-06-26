@@ -34,6 +34,7 @@ export default function CharacterManager({ profile }: { profile: Profile }) {
     class_key: DEFAULT_CLASS.key,
     owner_user_id: '',
     level: 1,
+    personal_passives: '',
     token_color: DEFAULT_TOKEN_COLOR
   });
 
@@ -100,7 +101,7 @@ export default function CharacterManager({ profile }: { profile: Profile }) {
         current_hp: preset.health,
         max_mana: preset.mana,
         current_mana: preset.mana,
-        notes: '',
+        notes: form.personal_passives.trim(),
         token_color: form.token_color,
         attributes: preset.attributes,
         location_id: defaultLocation?.id ?? null
@@ -110,7 +111,7 @@ export default function CharacterManager({ profile }: { profile: Profile }) {
 
     setCreating(false);
     if (!error && data) {
-      setForm({ name: '', class_key: DEFAULT_CLASS.key, owner_user_id: '', level: 1, token_color: DEFAULT_TOKEN_COLOR });
+      setForm({ name: '', class_key: DEFAULT_CLASS.key, owner_user_id: '', level: 1, personal_passives: '', token_color: DEFAULT_TOKEN_COLOR });
       setShowCreator(false);
       setOpenId(data.id);
       await loadData();
@@ -220,7 +221,7 @@ export default function CharacterManager({ profile }: { profile: Profile }) {
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="hidden">
+            <label className="sm:col-span-2">
               <span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-[var(--muted)]">Character name</span>
               <input className="field" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="E.g. Seraphine Vale" />
             </label>
@@ -286,10 +287,15 @@ export default function CharacterManager({ profile }: { profile: Profile }) {
             </div>
           </section>
 
-          <div className="mt-4 grid gap-3 lg:grid-cols-[22rem]">
-            <label className="hidden">
-              <span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-[var(--muted)]">Notes</span>
-              <textarea className="field min-h-24" value="" onChange={() => undefined} placeholder="Background, starting traits, player notes…" />
+          <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_22rem]">
+            <label>
+              <span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-[var(--muted)]">Personal passives / abilities</span>
+              <textarea
+                className="field min-h-24"
+                value={form.personal_passives}
+                onChange={(event) => setForm({ ...form, personal_passives: event.target.value })}
+                placeholder="Optional. One passive or ability per line."
+              />
             </label>
             <div className="surface-soft rounded-xl p-3">
               <span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-[var(--muted)]">Token color</span>
