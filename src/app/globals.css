@@ -306,6 +306,33 @@ h3,
 body.inventory-drag-active {
   user-select: none;
   overscroll-behavior: contain;
+  touch-action: none;
+}
+
+body.inventory-drag-active * {
+  touch-action: none !important;
+}
+
+.inventory-drag-ghost {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: min(13rem, 72vw);
+  min-height: 3.25rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 0.95rem;
+  transform: translate(-50%, -58%);
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.45), 0 0 0 2px rgba(224, 166, 78, 0.42);
+  backdrop-filter: blur(8px);
+}
+
+.inventory-drag-ghost-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--brass);
 }
 
 .inventory-item-name {

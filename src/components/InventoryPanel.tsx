@@ -54,6 +54,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
   const [busy, setBusy] = useState(false);
   const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
   const [dragTargetKey, setDragTargetKey] = useState<string | null>(null);
+  const [dragGhost, setDragGhost] = useState<{ item: InventoryItem; x: number; y: number } | null>(null);
   const [openStorageIds, setOpenStorageIds] = useState<Set<string>>(() => new Set());
   const dragTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragCandidate = useRef<{ item: InventoryItem; x: number; y: number } | null>(null);
@@ -102,7 +103,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     stopAutoScroll();
     if (!direction) return;
     autoScrollDirection.current = direction;
-    autoScrollTimer.current = setInterval(() => window.scrollBy({ top: direction * 4, behavior: 'auto' }), 32);
+    autoScrollTimer.current = setInterval(() => window.scrollBy({ top: direction * 9, behavior: 'auto' }), 24);
   }
 
   function resetDrag() {
@@ -113,6 +114,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     dragTarget.current = null;
     setDraggingItemId(null);
     setDragTargetKey(null);
+    setDragGhost(null);
     stopAutoScroll();
     document.body.classList.remove('inventory-drag-active');
   }
@@ -161,6 +163,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
       }
       if (!draggingItem.current) return;
       event.preventDefault();
+      setDragGhost({ item: draggingItem.current, x: event.clientX, y: event.clientY });
       const element = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-inventory-slot]');
       if (element) {
         const slot = Number(element.dataset.slotIndex);
@@ -209,6 +212,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     dragTimer.current = setTimeout(() => {
       draggingItem.current = item;
       setDraggingItemId(item.id);
+      setDragGhost({ item, x: event.clientX, y: event.clientY });
       document.body.classList.add('inventory-drag-active');
       if (navigator.vibrate) navigator.vibrate(18);
     }, 380);
@@ -470,6 +474,18 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
             )}
           </form>
         </Modal>
+      )}
+
+      {dragGhost && (
+        <div
+          className={`inventory-drag-ghost ${rarityClass(dragGhost.item.rarity)}`}
+          style={{ left: dragGhost.x, top: dragGhost.y }}
+          aria-hidden="true"
+        >
+          <span className="inventory-drag-ghost-icon"><ItemIcon type={dragGhost.item.item_type} size={17} /></span>
+          <span className="min-w-0 flex-1 truncate font-black">{dragGhost.item.item_name}</span>
+          <span className="text-[10px] font-black text-[var(--muted)]">×{dragGhost.item.quantity}</span>
+        </div>
       )}
     </section>
   );
