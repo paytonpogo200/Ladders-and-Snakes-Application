@@ -623,7 +623,8 @@ export default function CharacterSheet({
     const lines = modifierLines(item);
     const spellName = item ? imbuedSpellName(item.notes) : '';
     const abilityDisplay = item && item.rarity === 'Legendary' ? legendaryDisplayText(item) : '';
-    const filledClass = item ? `loadout-filled rarity-card ${rarityClass(item.rarity)}` : '';
+    const enchantedClass = item && spellName ? 'inventory-enchanted-outline loadout-enchanted-outline' : '';
+    const filledClass = item ? `loadout-filled rarity-card ${rarityClass(item.rarity)} ${enchantedClass}` : '';
     return (
       <div
         data-loadout-slot={slot}
