@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Apple, Box, Check, ChevronDown, FlaskConical, Home, Leaf, PackageOpen, Pickaxe, Plus, ScrollText, Send, Shield, Shirt, Sword, Trash2, Wrench, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent, type DragEvent } from 'react';
+import { AlertTriangle, Apple, Box, Check, ChevronDown, FlaskConical, Home, Leaf, PackageOpen, PawPrint, Pickaxe, Plus, ScrollText, Send, Shield, Shirt, Sword, Trash2, Wrench, X, type LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import NumberInput from '@/components/NumberInput';
 import Modal from '@/components/Modal';
@@ -9,9 +9,11 @@ import { rarityClass } from '@/lib/rarity';
 import { createDebouncedRefresh } from '@/lib/realtime';
 import type { Character, CharacterTransferCapacity, InventoryItem, InventoryItemType, Profile, Spell } from '@/lib/types';
 
-const itemTypes: { value: InventoryItemType; label: string; icon: typeof Box }[] = [
+const itemTypes: { value: InventoryItemType; label: string; icon: LucideIcon }[] = [
   { value: 'weapon', label: 'Weapon', icon: Sword },
   { value: 'armor', label: 'Armor', icon: Shield },
+  { value: 'shield' as InventoryItemType, label: 'Shield', icon: Shield },
+  { value: 'pet' as InventoryItemType, label: 'Pet', icon: PawPrint },
   { value: 'ore', label: 'Ore', icon: Pickaxe },
   { value: 'potion', label: 'Potion', icon: FlaskConical },
   { value: 'food', label: 'Food', icon: Apple },
@@ -22,26 +24,43 @@ const itemTypes: { value: InventoryItemType; label: string; icon: typeof Box }[]
   { value: 'misc', label: 'Misc.', icon: Box }
 ];
 
-const legacyItemTypes: { value: InventoryItemType; label: string; icon: typeof Box }[] = [
+const legacyItemTypes: { value: InventoryItemType; label: string; icon: LucideIcon }[] = [
   { value: 'consumable', label: 'Consumable', icon: FlaskConical }
 ];
 
+type InventoryItemWithLock = InventoryItem & { is_trade_locked?: boolean | null };
+
 function imbuedSpellName(notes?: string | null) {
-  return notes?.match(/Imbued spell:\s*(.+)/i)?.[1]?.trim() ?? '';
+  return notes?.match(/Imbued spell:\s*([^\n]+)/i)?.[1]?.trim() ?? '';
+}
+
+function legendaryDescription(notes?: string | null) {
+  return notes?.match(/Legendary Weapon:\s*([^\n]+)/i)?.[1]?.trim() ?? '';
 }
 
 function imbueNotes(spellName: string) {
   return spellName ? `Imbued spell: ${spellName}` : '';
 }
 
+function legendaryNotes(description: string, spellName: string) {
+  const chunks: string[] = [];
+  if (description.trim()) chunks.push(`Legendary Weapon: ${description.trim()}`);
+  if (spellName.trim()) chunks.push(imbueNotes(spellName.trim()));
+  return chunks.join('\n');
+}
+
+function itemTypeValue(item: InventoryItem | { item_type: InventoryItemType } | null | undefined) {
+  return String(item?.item_type ?? '');
+}
+
 function ItemIcon({ type, size = 19 }: { type: InventoryItemType; size?: number }) {
-  const Icon = itemTypes.find((entry) => entry.value === type)?.icon ?? legacyItemTypes.find((entry) => entry.value === type)?.icon ?? Box;
+  const Icon = itemTypes.find((entry) => String(entry.value) === String(type))?.icon ?? legacyItemTypes.find((entry) => entry.value === type)?.icon ?? Box;
   return <Icon size={size} />;
 }
 
 export default function InventoryPanel({ character, canEdit, profile }: { character: Character; canEdit: boolean; profile: Profile }) {
   const supabase = useMemo(() => createClient(), []);
-  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [items, setItems] = useState<InventoryItemWithLock[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [emptyTarget, setEmptyTarget] = useState<{ slot: number; parentId: string | null } | null>(null);
   const [action, setAction] = useState<'inspect' | 'drop' | 'give' | 'house'>('inspect');
@@ -54,11 +73,11 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
   const [busy, setBusy] = useState(false);
   const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
   const [dragTargetKey, setDragTargetKey] = useState<string | null>(null);
-  const [dragGhost, setDragGhost] = useState<{ item: InventoryItem; x: number; y: number } | null>(null);
+  const [dragGhost, setDragGhost] = useState<{ item: InventoryItemWithLock; x: number; y: number } | null>(null);
   const [openStorageIds, setOpenStorageIds] = useState<Set<string>>(() => new Set());
   const dragTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dragCandidate = useRef<{ item: InventoryItem; x: number; y: number } | null>(null);
-  const draggingItem = useRef<InventoryItem | null>(null);
+  const dragCandidate = useRef<{ item: InventoryItemWithLock; x: number; y: number } | null>(null);
+  const draggingItem = useRef<InventoryItemWithLock | null>(null);
   const dragTarget = useRef<{ slot: number; parentId: string | null } | null>(null);
   const autoScrollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const autoScrollDirection = useRef(0);
@@ -69,7 +88,9 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     item_type: 'misc' as InventoryItemType,
     imbued_spell_id: '',
     equipped: false,
-    storage_capacity: 0
+    storage_capacity: 0,
+    legendary_weapon: false,
+    legendary_description: ''
   });
 
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null;
@@ -121,7 +142,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
 
   async function loadItems() {
     const { data, error } = await supabase.from('inventory_items').select('*').eq('character_id', character.id).order('created_at');
-    if (!error) setItems((data ?? []) as InventoryItem[]);
+    if (!error) setItems((data ?? []) as InventoryItemWithLock[]);
   }
 
   async function loadTransferOptions() {
@@ -130,6 +151,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
       supabase.rpc('get_character_transfer_capacity'),
       supabase.from('spells').select('*').order('category').order('name')
     ]);
+
     if (!characterResult.error) {
       const loaded = ((characterResult.data ?? []) as Character[]).filter((entry) => entry.id !== character.id && entry.owner_user_id);
       setCharacters(loaded);
@@ -147,6 +169,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
       .channel(`inventory-${character.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_items', filter: `character_id=eq.${character.id}` }, refreshItems)
       .subscribe();
+
     return () => {
       refreshItems.cancel();
       supabase.removeChannel(channel);
@@ -154,7 +177,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
   }, [character.id]);
 
   useEffect(() => {
-    function pointerMove(event: PointerEvent) {
+    function pointerMove(event: globalThis.PointerEvent) {
       const candidate = dragCandidate.current;
       if (candidate && !draggingItem.current) {
         event.preventDefault();
@@ -163,7 +186,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
       if (!draggingItem.current) return;
       event.preventDefault();
       setDragGhost({ item: draggingItem.current, x: event.clientX, y: event.clientY });
-      const element = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-inventory-slot]');
+      const element = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-inventory-slot]') as HTMLElement | null;
       if (element) {
         const slot = Number(element.dataset.slotIndex);
         const parentId = element.dataset.parentId === 'main' ? null : element.dataset.parentId ?? null;
@@ -184,7 +207,9 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
       const target = dragTarget.current;
       if (item) {
         suppressClick.current = true;
-        window.setTimeout(() => { suppressClick.current = false; }, 80);
+        window.setTimeout(() => {
+          suppressClick.current = false;
+        }, 80);
         if (target && (item.slot_index !== target.slot || item.parent_item_id !== target.parentId)) {
           void moveItem(item, target.slot, target.parentId);
         }
@@ -203,7 +228,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     };
   }, [character.id]);
 
-  function beginLongPress(item: InventoryItem, event: React.PointerEvent<HTMLButtonElement>) {
+  function beginLongPress(item: InventoryItemWithLock, event: PointerEvent<HTMLButtonElement>) {
     if (!mayManage || item.is_storage || event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     if (dragTimer.current) clearTimeout(dragTimer.current);
@@ -217,7 +242,18 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     }, 380);
   }
 
-  async function moveItem(item: InventoryItem, slot: number, parentId: string | null) {
+  function beginNativeDrag(item: InventoryItemWithLock, event: DragEvent<HTMLButtonElement>) {
+    if (!mayManage || item.is_storage) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.setData('application/x-inventory-item-id', item.id);
+    event.dataTransfer.setData('text/plain', item.id);
+    event.dataTransfer.effectAllowed = 'move';
+    setDraggingItemId(item.id);
+  }
+
+  async function moveItem(item: InventoryItemWithLock, slot: number, parentId: string | null) {
     setMessage('');
     const { error } = await supabase.rpc('move_inventory_item_slot', {
       target_item_id: item.id,
@@ -228,7 +264,8 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     await loadItems();
   }
 
-  function openItem(item: InventoryItem) {
+  function openItem(item: InventoryItemWithLock) {
+    const matchedSpell = spells.find((spell) => spell.name === imbuedSpellName(item.notes));
     setSelectedItemId(item.id);
     setEmptyTarget(null);
     setAction('inspect');
@@ -238,9 +275,11 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
       item_name: item.item_name,
       quantity: item.quantity,
       item_type: item.item_type,
-      imbued_spell_id: spells.find((spell) => spell.name === imbuedSpellName(item.notes))?.id ?? '',
+      imbued_spell_id: matchedSpell?.id ?? '',
       equipped: item.equipped,
-      storage_capacity: item.storage_capacity ?? 0
+      storage_capacity: item.storage_capacity ?? 0,
+      legendary_weapon: item.rarity === 'Legendary' && itemTypeValue(item) === 'weapon',
+      legendary_description: legendaryDescription(item.notes)
     });
   }
 
@@ -250,7 +289,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     setEmptyTarget({ slot, parentId });
     setAction('inspect');
     setMessage('');
-    setForm({ item_name: '', quantity: 1, item_type: 'misc', imbued_spell_id: '', equipped: false, storage_capacity: 0 });
+    setForm({ item_name: '', quantity: 1, item_type: 'misc', imbued_spell_id: '', equipped: false, storage_capacity: 0, legendary_weapon: false, legendary_description: '' });
   }
 
   function closeEditor() {
@@ -260,30 +299,29 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     setMessage('');
   }
 
-  async function saveItem(event: React.FormEvent) {
+  async function saveItem(event: FormEvent) {
     event.preventDefault();
     if (!canEdit || !form.item_name.trim()) return;
     setBusy(true);
+    const spellName = spells.find((spell) => spell.id === form.imbued_spell_id)?.name ?? '';
+    const isLegendaryWeapon = itemTypeValue(form) === 'weapon' && form.legendary_weapon;
     const payload = {
       item_name: form.item_name.trim(),
       quantity: Math.max(1, Number(form.quantity) || 1),
       item_type: form.item_type,
-      notes: form.item_type === 'weapon' ? imbueNotes(spells.find((spell) => spell.id === form.imbued_spell_id)?.name ?? '') : '',
+      notes: itemTypeValue(form) === 'weapon'
+        ? isLegendaryWeapon
+          ? legendaryNotes(form.legendary_description, spellName)
+          : imbueNotes(spellName)
+        : '',
+      rarity: isLegendaryWeapon ? 'Legendary' : (selectedItem?.rarity ?? 'Common'),
       equipped: form.equipped
     };
+
     const result = selectedItem
-      ? await supabase.from('inventory_items').update({
-          ...payload,
-          storage_capacity: selectedItem.is_storage ? Math.max(1, Number(form.storage_capacity) || 1) : 0
-        }).eq('id', selectedItem.id)
-      : await supabase.from('inventory_items').insert({
-          ...payload,
-          character_id: character.id,
-          slot_index: emptyTarget?.slot ?? 0,
-          parent_item_id: emptyTarget?.parentId ?? null,
-          is_storage: false,
-          storage_capacity: 0
-        });
+      ? await supabase.from('inventory_items').update({ ...payload, storage_capacity: selectedItem.is_storage ? Math.max(1, Number(form.storage_capacity) || 1) : 0 }).eq('id', selectedItem.id)
+      : await supabase.from('inventory_items').insert({ ...payload, character_id: character.id, slot_index: emptyTarget?.slot ?? 0, parent_item_id: emptyTarget?.parentId ?? null, is_storage: false, storage_capacity: 0 });
+
     setBusy(false);
     if (result.error) return setMessage(result.error.message);
     closeEditor();
@@ -313,7 +351,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     });
     setBusy(false);
     if (error) return setMessage(error.message);
-    setMessage('Transfer request sent. It will remain available until accepted, declined, or cancelled.');
+    setMessage('Transfer request sent.\nIt will remain available until accepted, declined, or cancelled.');
     setAction('inspect');
     await loadTransferOptions();
   }
@@ -332,16 +370,19 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     await loadItems();
   }
 
-  function renderSlot(item: InventoryItem | undefined, slot: number, parentId: string | null) {
+  function renderSlot(item: InventoryItemWithLock | undefined, slot: number, parentId: string | null) {
     const key = slotKey(slot, parentId);
+    const spellName = item ? imbuedSpellName(item.notes) : '';
     return (
       <button
-        key={slot}
+        key={key}
         type="button"
         data-inventory-slot
-        data-inventory-item={item ? 'true' : 'false'}
-        data-parent-id={parentId ?? 'main'}
         data-slot-index={slot}
+        data-parent-id={parentId ?? 'main'}
+        draggable={!!item && mayManage && !item.is_storage}
+        onDragStart={(event) => item && beginNativeDrag(item, event)}
+        onDragEnd={() => setDraggingItemId(null)}
         onPointerDown={(event) => item && beginLongPress(item, event)}
         onClick={() => {
           if (suppressClick.current) return;
@@ -351,74 +392,91 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
           item ? rarityClass(item.rarity) : 'border-dashed border-[var(--line)] bg-black/10'
         } ${!item && !canEdit ? 'cursor-default' : ''} ${draggingItemId === item?.id ? 'inventory-slot-dragging' : ''} ${dragTargetKey === key ? 'inventory-slot-target' : ''}`}
       >
-        <span className="absolute right-2 top-1.5 text-[9px] font-bold text-[var(--muted)]">{slot + 1}</span>
+        <span className="pointer-events-none absolute left-2 top-1.5 text-[9px] font-black text-[var(--muted)]">{slot + 1}</span>
         {item ? (
           <>
-            <span className="inventory-slot-icon text-[var(--brass)]"><ItemIcon type={item.item_type} /></span>
-            <span className="inventory-item-name mt-1 w-full text-[10px] font-black leading-[1.08] sm:text-[11px]">{item.item_name}</span>
-            <span className="mt-0.5 text-[10px] font-black text-[var(--muted)]">×{item.quantity}</span>
-            {item.equipped && <span className="absolute bottom-1.5 right-1.5 rounded-full bg-[var(--teal)] p-0.5 text-[#07110e]"><Check size={9} /></span>}
+            <span className="mb-1 text-[var(--brass)]"><ItemIcon type={item.item_type} /></span>
+            <span className="inventory-item-name line-clamp-2 text-xs font-black leading-4">{item.item_name}</span>
+            {spellName && <span className="inventory-imbued-spell">{spellName}</span>}
+            {item.quantity > 1 && <span className="mt-1 rounded-full bg-black/40 px-1.5 text-[10px] font-black">×{item.quantity}</span>}
+            {item.equipped && <Check className="absolute right-1.5 top-1.5 text-[var(--teal)]" size={13} />}
+            {item.is_trade_locked && <span className="absolute bottom-1 right-1 rounded-full border border-[#d1a85b66] bg-black/40 px-1 text-[8px] font-black text-[var(--brass)]">UNIQUE</span>}
           </>
-        ) : canEdit ? <Plus size={18} className="text-[var(--muted)]" /> : null}
+        ) : canEdit ? <Plus className="text-[var(--muted)]" size={16} /> : null}
       </button>
     );
   }
 
   return (
-    <section>
-      <div className="rule-title mb-3">
-        <h4 className="flex items-center gap-2 text-sm font-black uppercase tracking-wider"><PackageOpen size={16} /> Inventory</h4>
+    <section className="surface rounded-2xl p-4 sm:p-5">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <p className="eyebrow">Inventory</p>
+          <h3 className="text-xl font-black">Carried Items</h3>
+        </div>
+        <div className="rounded-full border border-[var(--line)] bg-black/20 px-3 py-1 text-xs font-black text-[var(--muted)]">
+          {mainItems.filter((item) => item.slot_index < slotCount).length}/{slotCount}
+        </div>
       </div>
-      <div className="mb-2 flex items-center justify-end text-xs text-[var(--muted)]">
-        <span className="font-black">{mainItems.filter((item) => item.slot_index < slotCount).length}/{slotCount}</span>
-      </div>
-      <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
+
+      <div className="grid grid-cols-4 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
         {Array.from({ length: slotCount }, (_, index) => renderSlot(mainItems.find((entry) => entry.slot_index === index), index, null))}
       </div>
 
-      {storageItems.map((storage) => {
-        const contents = items.filter((item) => item.parent_item_id === storage.id);
-        const isBagOfHolding = storage.item_name.trim().toLowerCase() === 'bag of holding';
-        const highestUsedSlot = contents.reduce((highest, item) => Math.max(highest, item.slot_index), -1);
-        const capacity = isBagOfHolding
-          ? Math.max(contents.length + 1, highestUsedSlot + 2, 1)
-          : Math.max(1, storage.storage_capacity);
-        return (
-          <details
-            key={storage.id}
-            className={`mt-4 rounded-2xl border border-[#63b5a538] bg-[#63b5a508] p-3 ${isBagOfHolding ? 'rarity-card rarity-mythical' : ''}`}
-            open={openStorageIds.has(storage.id)}
-            onToggle={(event) => setStorageOpen(storage.id, event.currentTarget.open)}
-          >
-            <summary className="mb-3 flex cursor-pointer list-none items-center gap-3 text-left">
-              <span className="rounded-xl bg-[#63b5a518] p-2 text-[var(--teal)]"><PackageOpen size={18} /></span>
-              <span className="min-w-0 flex-1"><span className="block truncate font-black">{storage.item_name}</span><span className="text-xs text-[var(--muted)]">{isBagOfHolding ? `∞ storage · ${contents.length} items` : `${contents.length}/${capacity} storage slots`}</span></span>
-              <ChevronDown size={17} className={`shrink-0 text-[var(--muted)] transition ${openStorageIds.has(storage.id) ? 'rotate-180' : ''}`} />
-            </summary>
-            <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
-              {Array.from({ length: capacity }, (_, index) => renderSlot(contents.find((entry) => entry.slot_index === index), index, storage.id))}
-            </div>
-          </details>
-        );
-      })}
+      {storageItems.length > 0 && (
+        <div className="mt-4 space-y-3">
+          {storageItems.map((storage) => {
+            const contents = items.filter((item) => item.parent_item_id === storage.id);
+            const isBagOfHolding = storage.item_name.trim().toLowerCase() === 'bag of holding';
+            const highestUsedSlot = contents.reduce((highest, item) => Math.max(highest, item.slot_index), -1);
+            const capacity = isBagOfHolding ? Math.max(contents.length + 1, highestUsedSlot + 2, 1) : Math.max(1, storage.storage_capacity);
+            const open = openStorageIds.has(storage.id);
+            return (
+              <details key={storage.id} open={open} onToggle={(event) => setStorageOpen(storage.id, event.currentTarget.open)} className="rounded-2xl border border-[#d1a85b2f] bg-black/15">
+                <summary className="flex cursor-pointer items-center justify-between gap-3 p-3">
+                  <span className="flex items-center gap-2 font-black"><PackageOpen size={17} /> {storage.item_name}</span>
+                  <span className="flex items-center gap-2 text-xs font-black text-[var(--muted)]">
+                    {isBagOfHolding ? `∞ storage · ${contents.length} items` : `${contents.length}/${capacity} storage slots`}
+                    <ChevronDown size={14} />
+                  </span>
+                </summary>
+                <div className="grid grid-cols-4 gap-2 border-t border-[#d1a85b1f] p-3 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
+                  {Array.from({ length: capacity }, (_, index) => renderSlot(contents.find((entry) => entry.slot_index === index), index, storage.id))}
+                </div>
+              </details>
+            );
+          })}
+        </div>
+      )}
 
       {(selectedItem || emptyTarget) && (
         <Modal onClose={closeEditor}>
-          <form onSubmit={saveItem} className="surface w-full max-w-xl rounded-2xl p-4">
-            <div className="mb-3 flex items-start justify-between gap-3">
+          <form onSubmit={saveItem} className="surface max-h-[90vh] w-[min(94vw,38rem)] overflow-y-auto rounded-2xl p-4 sm:p-5">
+            <div className="mb-4 flex items-start justify-between gap-3">
               <div>
-                <p className="eyebrow">{selectedItem?.rarity ?? (selectedItem ? 'Inventory item' : 'Empty slot')}</p>
-                <h5 className="mt-1 text-xl font-black">{selectedItem?.item_name ?? 'Add an item'}</h5>
+                <p className="eyebrow mb-2">{selectedItem?.rarity ?? (selectedItem ? 'Inventory item' : 'Empty slot')}</p>
+                <h3 className="text-2xl font-black">{selectedItem?.item_name ?? 'Add an item'}</h3>
               </div>
               <button type="button" onClick={closeEditor} className="rounded-lg border border-[var(--line)] p-2 text-[var(--muted)]"><X size={17} /></button>
             </div>
 
             {action === 'inspect' && canEdit && (
-              <div className="grid gap-2 sm:grid-cols-2">
-                <label className="sm:col-span-2"><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Item name</span><input className="field" required value={form.item_name} onChange={(e) => setForm({ ...form, item_name: e.target.value })} /></label>
-                <label><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Type</span><select className="field" value={form.item_type} onChange={(e) => setForm({ ...form, item_type: e.target.value as InventoryItemType })}>{itemTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label>
-                <label><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Quantity</span><NumberInput className="field" min={1} value={form.quantity} onValueChange={(quantity) => setForm({ ...form, quantity })} /></label>
-                {form.item_type === 'weapon' && spells.length > 0 && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="sm:col-span-2">
+                  <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Item name</span>
+                  <input className="field" value={form.item_name} onChange={(event) => setForm({ ...form, item_name: event.target.value })} />
+                </label>
+                <label>
+                  <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Type</span>
+                  <select className="field" value={String(form.item_type)} onChange={(event) => setForm({ ...form, item_type: event.target.value as InventoryItemType, legendary_weapon: event.target.value === 'weapon' ? form.legendary_weapon : false })}>
+                    {itemTypes.map((type) => <option key={String(type.value)} value={String(type.value)}>{type.label}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Quantity</span>
+                  <NumberInput className="field" min={1} value={form.quantity} onValueChange={(quantity) => setForm({ ...form, quantity })} />
+                </label>
+                {itemTypeValue(form) === 'weapon' && spells.length > 0 && (
                   <label className="sm:col-span-2">
                     <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Imbued spell</span>
                     <select className="field" value={form.imbued_spell_id} onChange={(event) => setForm({ ...form, imbued_spell_id: event.target.value })}>
@@ -427,49 +485,84 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
                     </select>
                   </label>
                 )}
-                {selectedItem?.is_storage && <label><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Storage slots</span><NumberInput className="field" min={1} max={500} value={form.storage_capacity} onValueChange={(storage_capacity) => setForm({ ...form, storage_capacity })} /></label>}
-                {!selectedItem?.is_storage && <button type="button" onClick={() => setForm({ ...form, equipped: !form.equipped })} className={`sm:col-span-2 flex items-center justify-between rounded-xl border p-3 text-sm font-bold ${form.equipped ? 'border-[var(--teal)] bg-[#63b5a510]' : 'border-[var(--line)]'}`}>Mark as equipped {form.equipped && <Check size={18} />}</button>}
+                {selectedItem?.is_storage && (
+                  <label>
+                    <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Storage slots</span>
+                    <NumberInput className="field" min={1} max={500} value={form.storage_capacity} onValueChange={(storage_capacity) => setForm({ ...form, storage_capacity })} />
+                  </label>
+                )}
+                {itemTypeValue(form) === 'weapon' && (
+                  <label className="flex items-start gap-3 rounded-xl border border-[#d1a85b45] bg-[#d1a85b0d] p-3 sm:col-span-2">
+                    <input type="checkbox" className="mt-1" checked={form.legendary_weapon} onChange={(event) => setForm({ ...form, legendary_weapon: event.target.checked })} />
+                    <span className="grid flex-1 gap-2">
+                      <span className="text-xs font-black uppercase tracking-wider text-[var(--brass)]">Legendary weapon</span>
+                      <span className="text-xs leading-5 text-[var(--muted)]">Gives the item the smoother Legendary gold/brass effect and stores its unique ability.</span>
+                      {form.legendary_weapon && (
+                        <textarea className="field min-h-20" value={form.legendary_description} onChange={(event) => setForm({ ...form, legendary_description: event.target.value })} placeholder="What does this legendary weapon do?" />
+                      )}
+                    </span>
+                  </label>
+                )}
+                {!selectedItem?.is_storage && (
+                  <button type="button" onClick={() => setForm({ ...form, equipped: !form.equipped })} className={`sm:col-span-2 flex items-center justify-between rounded-xl border p-3 text-sm font-bold ${form.equipped ? 'border-[var(--teal)] bg-[#63b5a510]' : 'border-[var(--line)]'}`}>
+                    Mark as equipped {form.equipped && <Check size={16} />}
+                  </button>
+                )}
               </div>
             )}
 
             {action === 'inspect' && selectedItem && !canEdit && (
-              <div className="rounded-xl border border-[var(--line)] bg-black/20 p-4 text-center">
-                <ItemIcon type={selectedItem.item_type} size={26} />
-                <p className="mt-2 font-black">{selectedItem.item_type}</p>
-                {selectedItem.item_type === 'weapon' && imbuedSpellName(selectedItem.notes) && <p className="mt-1 text-sm font-bold text-[var(--brass)]">Imbued: {imbuedSpellName(selectedItem.notes)}</p>}
-                <p className="text-sm text-[var(--muted)]">Quantity: {selectedItem.quantity}{selectedItem.is_storage ? ` · ${selectedItem.storage_capacity} storage slots` : ''}</p>
+              <div className="rounded-xl border border-[var(--line)] bg-black/15 p-3 text-sm leading-6 text-[var(--muted)]">
+                <p className="font-black text-[var(--paper)]">{selectedItem.item_type}</p>
+                {itemTypeValue(selectedItem) === 'weapon' && imbuedSpellName(selectedItem.notes) && <p>Imbued: {imbuedSpellName(selectedItem.notes)}</p>}
+                {itemTypeValue(selectedItem) === 'weapon' && legendaryDescription(selectedItem.notes) && <p>Legendary: {legendaryDescription(selectedItem.notes)}</p>}
+                <p>Quantity: {selectedItem.quantity}{selectedItem.is_storage ? ` · ${selectedItem.storage_capacity} storage slots` : ''}</p>
+                {selectedItem.is_trade_locked && <p className="text-[var(--brass)]">Unique item · cannot be traded.</p>}
               </div>
             )}
 
             {selectedItem && action !== 'inspect' && (
-              <section className="rounded-xl border border-[var(--line)] bg-black/20 p-3">
-                <div className="mb-3 flex items-center justify-between"><h6 className="font-black">{action === 'drop' ? 'Drop item' : action === 'give' ? 'Give item' : 'Send to house'}</h6><button type="button" onClick={() => setAction('inspect')} className="rounded-lg border border-[var(--line)] p-1.5"><X size={15} /></button></div>
+              <div className="rounded-xl border border-[var(--line)] bg-black/15 p-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h4 className="font-black">{action === 'drop' ? 'Drop item' : action === 'give' ? 'Give item' : 'Send to house'}</h4>
+                  <button type="button" onClick={() => setAction('inspect')} className="rounded-lg border border-[var(--line)] p-1.5"><X size={14} /></button>
+                </div>
                 {action === 'give' && (
-                  <label className="mb-2 block">
+                  <label className="block">
                     <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Send to</span>
                     <select className="field" value={transferTargetId} onChange={(event) => setTransferTargetId(event.target.value)}>
                       {characters.map((entry) => {
                         const free = capacities.find((capacity) => capacity.character_id === entry.id)?.free_slots ?? 0;
-                        return <option key={entry.id} value={entry.id} disabled={free <= 0 && !selectedItem.is_storage}>{entry.name} · {free > 0 || selectedItem.is_storage ? `${free} spaces` : 'FULL'}</option>;
+                        return <option key={entry.id} value={entry.id}>{entry.name} · {free > 0 || selectedItem.is_storage ? `${free} spaces` : 'FULL'}</option>;
                       })}
                     </select>
                   </label>
                 )}
-                <label><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Amount</span><NumberInput className="field" min={1} max={selectedItem.quantity} value={actionQuantity} onValueChange={setActionQuantity} /></label>
-                {action === 'give' && !selectedItem.is_storage && targetCapacity <= 0 && <p className="mt-2 flex items-center gap-2 text-xs font-bold text-[var(--red)]"><AlertTriangle size={14} /> That character?s inventory is full.</p>}
-                <button type="button" onClick={action === 'drop' ? dropItem : action === 'give' ? requestTransfer : sendToHouse} disabled={busy || (action === 'give' && !selectedItem.is_storage && targetCapacity <= 0)} className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 font-black disabled:opacity-40 ${action === 'drop' ? 'border border-[#d76a6255] text-[var(--red)]' : 'teal-button'}`}>
-                  {action === 'drop' ? <Trash2 size={17} /> : action === 'give' ? <Send size={17} /> : <Home size={17} />} {busy ? 'Working...' : action === 'drop' ? `Drop ${Math.max(1, actionQuantity)}` : action === 'give' ? `Send ${Math.max(1, actionQuantity)}` : `Store ${Math.max(1, actionQuantity)}`}
+                <label className="mt-3 block">
+                  <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Amount</span>
+                  <NumberInput className="field" min={1} max={selectedItem.quantity} value={actionQuantity} onValueChange={setActionQuantity} disabled={selectedItem.is_storage} />
+                </label>
+                {action === 'give' && !selectedItem.is_storage && targetCapacity <= 0 && <p className="mt-2 flex items-center gap-2 text-xs text-[var(--red)]"><AlertTriangle size={14} /> That character’s inventory is full.</p>}
+                <button
+                  type="button"
+                  onClick={action === 'drop' ? dropItem : action === 'give' ? requestTransfer : sendToHouse}
+                  disabled={busy || (action === 'give' && !selectedItem.is_storage && targetCapacity <= 0)}
+                  className="primary-button mt-3 w-full rounded-xl px-4 py-3 text-sm font-black disabled:opacity-40"
+                >
+                  {busy ? 'Working...' : action === 'drop' ? `Drop ${Math.max(1, actionQuantity)}` : action === 'give' ? `Send ${Math.max(1, actionQuantity)}` : `Store ${Math.max(1, actionQuantity)}`}
                 </button>
-              </section>
+              </div>
             )}
 
-            {message && <p className="mt-3 rounded-xl border border-[var(--line)] p-3 text-xs text-[var(--red)]">{message}</p>}
+            {message && <p className="mt-3 whitespace-pre-line rounded-xl border border-[#d1a85b38] bg-[#d1a85b08] p-3 text-xs leading-5 text-[var(--muted)]">{message}</p>}
+
             {action === 'inspect' && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {selectedItem && mayManage && <button type="button" onClick={() => { setAction('drop'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#d76a6255] px-4 py-3 text-sm font-black text-[var(--red)]"><Trash2 size={17} /> Drop</button>}
-                {selectedItem && mayManage && characters.length > 0 && <button type="button" onClick={() => { setAction('give'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#9caf7955] px-4 py-3 text-sm font-black text-[var(--teal)]"><Send size={17} /> Give</button>}
-                {selectedItem && mayManage && <button type="button" onClick={() => { setAction('house'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#e0a64e55] px-4 py-3 text-sm font-black text-[var(--brass)]"><Home size={17} /> House</button>}
-                {canEdit && <button disabled={busy} className="primary-button min-w-32 flex-1 rounded-xl px-4 py-3 font-black">{selectedItem ? 'Save item' : 'Add item'}</button>}
+              <div className="mt-4 flex flex-wrap gap-2">
+                {selectedItem && mayManage && <button type="button" onClick={() => { setAction('drop'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#d76a6255] px-4 py-3 text-sm font-black text-[var(--red)]"><Trash2 size={16} /> Drop</button>}
+                {selectedItem && mayManage && characters.length > 0 && !selectedItem.is_trade_locked && <button type="button" onClick={() => { setAction('give'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#9caf7955] px-4 py-3 text-sm font-black text-[var(--teal)]"><Send size={16} /> Give</button>}
+                {selectedItem && mayManage && selectedItem.is_trade_locked && <span className="flex items-center gap-2 rounded-xl border border-[#d1a85b55] px-4 py-3 text-sm font-black text-[var(--brass)]">Unique · cannot trade</span>}
+                {selectedItem && mayManage && <button type="button" onClick={() => { setAction('house'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#e0a64e55] px-4 py-3 text-sm font-black text-[var(--brass)]"><Home size={16} /> House</button>}
+                {canEdit && <button type="submit" disabled={busy || !form.item_name.trim()} className="primary-button ml-auto rounded-xl px-4 py-3 text-sm font-black disabled:opacity-40">{selectedItem ? 'Save item' : 'Add item'}</button>}
               </div>
             )}
           </form>
@@ -477,14 +570,8 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
       )}
 
       {dragGhost && (
-        <div
-          className={`inventory-drag-ghost ${rarityClass(dragGhost.item.rarity)}`}
-          style={{ left: dragGhost.x, top: dragGhost.y }}
-          aria-hidden="true"
-        >
-          <span className="inventory-drag-ghost-icon"><ItemIcon type={dragGhost.item.item_type} size={17} /></span>
-          <span className="min-w-0 flex-1 truncate font-black">{dragGhost.item.item_name}</span>
-          <span className="text-[10px] font-black text-[var(--muted)]">×{dragGhost.item.quantity}</span>
+        <div className="pointer-events-none fixed z-[100] rounded-xl border border-[var(--brass)] bg-[#1a0d05f2] px-3 py-2 text-xs font-black shadow-2xl" style={{ left: dragGhost.x + 12, top: dragGhost.y + 12 }}>
+          {dragGhost.item.item_name} ×{dragGhost.item.quantity}
         </div>
       )}
     </section>

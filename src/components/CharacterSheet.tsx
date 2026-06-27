@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type DragEvent } from 'react';
 import { Coins, Gift, Heart, PackageOpen, PawPrint, Plus, Save, Shield, Sparkles, Sword, UserRound, WandSparkles, type LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import InventoryPanel from '@/components/InventoryPanel';
@@ -31,6 +31,8 @@ import {
 const grantItemTypes: { value: InventoryItemType; label: string }[] = [
   { value: 'weapon', label: 'Weapon' },
   { value: 'armor', label: 'Armor' },
+  { value: 'shield' as InventoryItemType, label: 'Shield' },
+  { value: 'pet' as InventoryItemType, label: 'Pet' },
   { value: 'ore', label: 'Ore' },
   { value: 'potion', label: 'Potion' },
   { value: 'food', label: 'Food' },
@@ -41,8 +43,21 @@ const grantItemTypes: { value: InventoryItemType; label: string }[] = [
   { value: 'misc', label: 'Misc.' }
 ];
 
+type LoadoutSlotKey = 'weapon' | 'armor' | 'shield' | 'pet';
+
 function imbueNotes(spellName: string) {
   return spellName ? `Imbued spell: ${spellName}` : '';
+}
+
+function legendaryNotes(description: string, spellName: string) {
+  const chunks: string[] = [];
+  if (description.trim()) chunks.push(`Legendary Weapon: ${description.trim()}`);
+  if (spellName.trim()) chunks.push(imbueNotes(spellName.trim()));
+  return chunks.join('\n');
+}
+
+function typeOfItem(item?: InventoryItem | null) {
+  return String(item?.item_type ?? '');
 }
 
 export default function CharacterSheet({
@@ -86,8 +101,17 @@ export default function CharacterSheet({
   const [grantMode, setGrantMode] = useState<'catalog' | 'custom'>('catalog');
   const [grantProductId, setGrantProductId] = useState('');
   const [grantCatalogQuantity, setGrantCatalogQuantity] = useState(1);
-  const [grantForm, setGrantForm] = useState({ name: '', quantity: 1, item_type: 'misc' as InventoryItemType, imbued_spell_id: '', storage_capacity: 0 });
+  const [grantForm, setGrantForm] = useState({
+    name: '',
+    quantity: 1,
+    item_type: 'misc' as InventoryItemType,
+    imbued_spell_id: '',
+    storage_capacity: 0,
+    legendary_weapon: false,
+    legendary_description: ''
+  });
   const [toolMessage, setToolMessage] = useState('');
+  const [hoveredLoadoutSlot, setHoveredLoadoutSlot] = useState<LoadoutSlotKey | null>(null);
 
   useEffect(() => {
     const supabase = createClient();
@@ -132,6 +156,7 @@ export default function CharacterSheet({
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_items', filter: `character_id=eq.${character.id}` }, loadLoadoutStrip)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'character_properties', filter: `character_id=eq.${character.id}` }, loadLoadoutStrip)
       .subscribe();
+
     return () => {
       supabase.removeChannel(channel);
     };
@@ -155,21 +180,59 @@ export default function CharacterSheet({
 
   async function grantItem() {
     const supabase = createClient();
+    const selectedSpell = spells.find((spell) => spell.id === grantForm.imbued_spell_id);
+    const itemType = String(grantForm.item_type);
+    const isLegendaryWeapon = itemType === 'weapon' && grantForm.legendary_weapon;
+
     const result = grantMode === 'catalog'
-      ? await supabase.rpc('dm_grant_market_item', { target_character_id: character.id, target_product_id: grantProductId, quantity_input: Math.max(1, grantCatalogQuantity || 1) })
+      ? await supabase.rpc('dm_grant_market_item', {
+          target_character_id: character.id,
+          target_product_id: grantProductId,
+          quantity_input: Math.max(1, grantCatalogQuantity || 1)
+        })
       : await supabase.rpc('dm_grant_custom_item', {
           target_character_id: character.id,
           item_name_input: grantForm.name.trim(),
           quantity_input: Number(grantForm.quantity) || 1,
-          notes_input: grantForm.item_type === 'weapon' ? imbueNotes(spells.find((spell) => spell.id === grantForm.imbued_spell_id)?.name ?? '') : '',
+          notes_input: itemType === 'weapon'
+            ? isLegendaryWeapon
+              ? legendaryNotes(grantForm.legendary_description, selectedSpell?.name ?? '')
+              : imbueNotes(selectedSpell?.name ?? '')
+            : '',
           item_type_input: grantForm.item_type,
-          storage_capacity_input: Math.max(0, Number(grantForm.storage_capacity) || 0)
+          storage_capacity_input: Math.max(0, Number(grantForm.storage_capacity) || 0),
+          rarity_input: isLegendaryWeapon ? 'Legendary' : 'Common',
+          trade_locked_input: false
         });
+
     setToolMessage(result.error ? result.error.message : 'Item added to the character.');
     if (!result.error) {
-      setGrantForm({ name: '', quantity: 1, item_type: 'misc', imbued_spell_id: '', storage_capacity: 0 });
+      setGrantForm({ name: '', quantity: 1, item_type: 'misc', imbued_spell_id: '', storage_capacity: 0, legendary_weapon: false, legendary_description: '' });
+      await loadLoadoutStrip();
       onSaved();
     }
+  }
+
+  async function equipDroppedItem(slot: LoadoutSlotKey, event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setHoveredLoadoutSlot(null);
+
+    const itemId = event.dataTransfer.getData('application/x-inventory-item-id') || event.dataTransfer.getData('text/plain');
+    if (!itemId) return;
+
+    const { error } = await createClient().rpc('equip_inventory_item', {
+      target_item_id: itemId,
+      target_slot: slot
+    });
+
+    if (error) {
+      setToolMessage(error.message);
+      return;
+    }
+
+    setToolMessage(`${slot === 'pet' ? 'Pet' : slot.charAt(0).toUpperCase() + slot.slice(1)} equipped.`);
+    await loadLoadoutStrip();
+    onSaved();
   }
 
   function setAttribute(key: keyof CharacterAttributes, value: number) {
@@ -205,19 +268,32 @@ export default function CharacterSheet({
   const shownAttributes = editing ? form.attributes : attributes;
   const personalPassives = (editing ? form.personal_passives : character.notes ?? '').trim();
   const personalPassiveLines = personalPassives.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const equippedWeapon = equipmentItems.find((item) => item.item_type === 'weapon') ?? null;
-  const equippedArmor = equipmentItems.find((item) => item.item_type === 'armor' && !/shield/i.test(item.item_name)) ?? null;
-  const equippedShield = equipmentItems.find((item) => /shield/i.test(item.item_name)) ?? null;
-  const activePet = properties.find((entry) => entry.property_type === 'animal') ?? null;
+  const equippedWeapon = equipmentItems.find((item) => typeOfItem(item) === 'weapon') ?? null;
+  const equippedArmor = equipmentItems.find((item) => typeOfItem(item) === 'armor') ?? null;
+  const equippedShield = equipmentItems.find((item) => typeOfItem(item) === 'shield') ?? null;
+  const activePetItem = equipmentItems.find((item) => typeOfItem(item) === 'pet') ?? null;
+  const activeAnimal = properties.find((entry) => entry.property_type === 'animal') ?? null;
 
-  function LoadoutSlot({ label, value, icon: Icon }: { label: string; value: string; icon: LucideIcon }) {
+  function LoadoutSlot({ label, slot, value, icon: Icon }: { label: string; slot: LoadoutSlotKey; value: string; icon: LucideIcon }) {
+    const active = hoveredLoadoutSlot === slot;
     return (
-      <div className="surface-soft min-h-20 rounded-xl border border-[#e0a64e22] p-3">
+      <div
+        className={`loadout-drop-slot surface-soft min-h-20 rounded-xl border p-3 ${active ? 'loadout-drop-slot-active' : ''}`}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+          setHoveredLoadoutSlot(slot);
+        }}
+        onDragLeave={() => setHoveredLoadoutSlot((current) => (current === slot ? null : current))}
+        onDrop={(event) => equipDroppedItem(slot, event)}
+        title={`Drag a ${label.toLowerCase()} item here to equip it.`}
+      >
         <div className="mb-2 flex items-center gap-2 text-[var(--brass)]">
-          <Icon size={16} />
+          <Icon size={15} />
           <span className="text-[10px] font-black uppercase tracking-wider">{label}</span>
         </div>
-        <p className={`text-sm font-black leading-5 ${value === 'Empty' ? 'text-[var(--muted)]' : 'text-[var(--paper)]'}`}>{value}</p>
+        <p className="text-sm font-black leading-5">{value}</p>
+        <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">Drop eligible item here</p>
       </div>
     );
   }
@@ -345,17 +421,29 @@ export default function CharacterSheet({
           ) : (
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
               <input className="field sm:col-span-2" value={grantForm.name} onChange={(event) => setGrantForm({ ...grantForm, name: event.target.value })} placeholder="Custom item name" />
-              <select className="field" value={grantForm.item_type} onChange={(event) => setGrantForm({ ...grantForm, item_type: event.target.value as InventoryItemType })}>
-                {grantItemTypes.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}
+              <select className="field" value={grantForm.item_type} onChange={(event) => setGrantForm({ ...grantForm, item_type: event.target.value as InventoryItemType, legendary_weapon: event.target.value === 'weapon' ? grantForm.legendary_weapon : false })}>
+                {grantItemTypes.map((entry) => <option key={String(entry.value)} value={String(entry.value)}>{entry.label}</option>)}
               </select>
               <NumberInput className="field" min={1} value={grantForm.quantity} onValueChange={(quantity) => setGrantForm({ ...grantForm, quantity })} placeholder="Quantity" />
-              {grantForm.item_type === 'weapon' && spells.length > 0 && (
-                <select className="field sm:col-span-2" value={grantForm.imbued_spell_id} onChange={(event) => setGrantForm({ ...grantForm, imbued_spell_id: event.target.value })}>
+              {String(grantForm.item_type) === 'weapon' && spells.length > 0 && (
+                <select className="field" value={grantForm.imbued_spell_id} onChange={(event) => setGrantForm({ ...grantForm, imbued_spell_id: event.target.value })}>
                   <option value="">No imbued spell</option>
                   {spells.map((spell) => <option key={spell.id} value={spell.id}>{spell.category} · {spell.name}</option>)}
                 </select>
               )}
               <NumberInput className="field" min={0} value={grantForm.storage_capacity} onValueChange={(storage_capacity) => setGrantForm({ ...grantForm, storage_capacity })} placeholder="Storage slots (0 = normal item)" />
+              {String(grantForm.item_type) === 'weapon' && (
+                <label className="flex items-start gap-3 rounded-xl border border-[#d1a85b45] bg-[#d1a85b0d] p-3 sm:col-span-2">
+                  <input type="checkbox" className="mt-1" checked={grantForm.legendary_weapon} onChange={(event) => setGrantForm({ ...grantForm, legendary_weapon: event.target.checked })} />
+                  <span className="grid flex-1 gap-2">
+                    <span className="text-xs font-black uppercase tracking-wider text-[var(--brass)]">Legendary weapon</span>
+                    <span className="text-xs leading-5 text-[var(--muted)]">Turns this weapon into a Legendary item and unlocks its ability description.</span>
+                    {grantForm.legendary_weapon && (
+                      <textarea className="field min-h-20" value={grantForm.legendary_description} onChange={(event) => setGrantForm({ ...grantForm, legendary_description: event.target.value })} placeholder="What does this legendary weapon do?" />
+                    )}
+                  </span>
+                </label>
+              )}
             </div>
           )}
           <button type="button" onClick={grantItem} disabled={grantMode === 'custom' && !grantForm.name.trim()} className="primary-button mt-2 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 font-black disabled:opacity-40"><Gift size={17} /> Give item</button>
@@ -430,55 +518,50 @@ export default function CharacterSheet({
         </section>
       )}
 
-      {(editing || personalPassiveLines.length > 0) && (
-        <section>
-          <div className="rule-title mb-3">
-            <h4 className="text-sm font-black uppercase tracking-wider">Personal Passives</h4>
-          </div>
-          <div className="surface-soft rounded-xl p-3">
-            {editing ? (
-              <textarea
-                className="field min-h-24"
-                value={form.personal_passives}
-                onChange={(event) => setForm({ ...form, personal_passives: event.target.value })}
-                placeholder="Optional. One passive or ability per line."
-              />
-            ) : (
-              <ul className="space-y-2">
-                {personalPassiveLines.map((passive) => (
-                  <li key={passive} className="flex gap-2 text-xs leading-5 text-[var(--muted)]">
-                    <span className="text-[var(--teal)]">◆</span>{passive}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </section>
-      )}
-
       <section className="hidden">
         <div className="rule-title mb-3">
           <h4 className="text-sm font-black uppercase tracking-wider">Notes</h4>
         </div>
         {editing ? (
-          <textarea className="field min-h-24" value="" onChange={() => undefined} placeholder="Backstory, conditions, reminders…" />
+          <textarea className="field min-h-24" value={form.personal_passives} onChange={(e) => setForm({ ...form, personal_passives: e.target.value })} placeholder="Backstory, conditions, reminders…" />
         ) : (
           <p className="surface-soft min-h-16 rounded-xl p-3 text-sm leading-6 text-[var(--muted)]">{character.notes || 'No notes recorded.'}</p>
         )}
       </section>
 
+      {personalPassiveLines.length > 0 && (
+        <section>
+          <div className="rule-title mb-3">
+            <h4 className="text-sm font-black uppercase tracking-wider">Personal Features</h4>
+          </div>
+          <div className="surface-soft rounded-xl p-3">
+            <ul className="space-y-2">
+              {personalPassiveLines.map((passive) => (
+                <li key={passive} className="flex gap-2 text-xs leading-5 text-[var(--muted)]">
+                  <span className="text-[var(--brass)]">◆</span>{passive}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
+
+      <div className="sheet-section-break" aria-hidden="true" />
+
       <SpellPanel character={character} canEdit={canEdit} readOnly={readOnly} onCharacterChanged={onSaved} />
+
       <section>
         <div className="rule-title mb-3">
           <h4 className="text-sm font-black uppercase tracking-wider">Loadout</h4>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <LoadoutSlot label="Armor" icon={Shield} value={equippedArmor?.item_name ?? 'Empty'} />
-          <LoadoutSlot label="Weapon" icon={Sword} value={equippedWeapon?.item_name ?? 'Empty'} />
-          <LoadoutSlot label="Shield" icon={Shield} value={equippedShield?.item_name ?? 'Empty'} />
-          <LoadoutSlot label="Active pet" icon={PawPrint} value={activePet?.custom_name || activePet?.property_name || 'Empty'} />
+          <LoadoutSlot label="Armor" slot="armor" icon={Shield} value={equippedArmor?.item_name ?? 'Empty'} />
+          <LoadoutSlot label="Weapon" slot="weapon" icon={Sword} value={equippedWeapon?.item_name ?? 'Empty'} />
+          <LoadoutSlot label="Shield" slot="shield" icon={Shield} value={equippedShield?.item_name ?? 'Empty'} />
+          <LoadoutSlot label="Active pet" slot="pet" icon={PawPrint} value={activePetItem?.item_name ?? (activeAnimal?.custom_name || activeAnimal?.property_name || 'Empty')} />
         </div>
       </section>
+
       <InventoryPanel character={character} canEdit={canEdit} profile={profile} />
       {character.class_key === 'beastmaster' && <TamedBeastsPanel character={character} profile={profile} readOnly={readOnly} />}
       <PropertyPanel character={character} profile={profile} readOnly={readOnly} />

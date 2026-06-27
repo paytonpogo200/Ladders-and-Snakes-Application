@@ -7,6 +7,8 @@ import type { Battle, Combatant, Profile } from '@/lib/types';
 
 const CELL_SIZE = 76;
 
+const STARTING_ZOOM = 0.8;
+
 type Props = {
   battle: Battle;
   combatants: Combatant[];
@@ -19,125 +21,73 @@ type Props = {
 export default function BattleMap({ battle, combatants, profile, selectedId, onSelect, onMove }: Props) {
   const isDm = profile.role === 'dm';
   const viewportRef = useRef<HTMLDivElement | null>(null);
-  const [zoom, setZoom] = useState(0.8);
+  const [zoom, setZoom] = useState(STARTING_ZOOM);
   const [pan, setPan] = useState({ x: 16, y: 16 });
   const [drag, setDrag] = useState<{ id: number; x: number; y: number; baseX: number; baseY: number; moved: boolean } | null>(null);
-  const panFrame = useRef<number | null>(null);
-  const queuedPan = useRef<{ x: number; y: number } | null>(null);
-  const dragMoved = useRef(false);
-  const activePointers = useRef(new Map<number, { x: number; y: number }>());
-  const pinch = useRef<{ distance: number; zoom: number; pan: { x: number; y: number }; center: { x: number; y: number }; mapPoint: { x: number; y: number } } | null>(null);
-  const size = useMemo(() => ({ width: battle.grid_width * CELL_SIZE, height: battle.grid_height * CELL_SIZE }), [battle]);
+  const size = useMemo(() => ({ width: battle.grid_width * CELL_SIZE, height: battle.grid_height * CELL_SIZE }), [battle.grid_width, battle.grid_height]);
 
-  useEffect(() => {
-    return () => {
-      if (panFrame.current !== null) window.cancelAnimationFrame(panFrame.current);
-    };
-  }, []);
+  function getTokenCenter() {
+    const visibleCombatants = combatants.filter((entry) => Number.isFinite(entry.x) && Number.isFinite(entry.y));
 
-  function schedulePan(nextPan: { x: number; y: number }) {
-    queuedPan.current = nextPan;
-    if (panFrame.current !== null) return;
+    if (visibleCombatants.length === 0) {
+      return {
+        x: Math.max(0.5, battle.grid_width / 2),
+        y: Math.max(0.5, battle.grid_height / 2)
+      };
+    }
 
-    panFrame.current = window.requestAnimationFrame(() => {
-      panFrame.current = null;
-      const next = queuedPan.current;
-      queuedPan.current = null;
-      if (next) setPan(next);
+    const avgX = visibleCombatants.reduce((sum, entry) => sum + entry.x, 0) / visibleCombatants.length;
+    const avgY = visibleCombatants.reduce((sum, entry) => sum + entry.y, 0) / visibleCombatants.length;
+
+    return { x: avgX + 0.5, y: avgY + 0.5 };
+  }
+
+  function centerView(nextZoom = zoom) {
+    const viewport = viewportRef.current;
+    const viewportWidth = viewport?.clientWidth ?? 900;
+    const viewportHeight = viewport?.clientHeight ?? 520;
+    const center = getTokenCenter();
+
+    setZoom(nextZoom);
+    setPan({
+      x: viewportWidth / 2 - center.x * CELL_SIZE * nextZoom,
+      y: viewportHeight / 2 - center.y * CELL_SIZE * nextZoom
     });
   }
 
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => centerView(STARTING_ZOOM));
+    return () => window.cancelAnimationFrame(frame);
+  }, [battle.id, battle.grid_width, battle.grid_height, combatants.length]);
+
   function resetView() {
-    if (panFrame.current !== null) window.cancelAnimationFrame(panFrame.current);
-    panFrame.current = null;
-    queuedPan.current = null;
-    setZoom(0.8);
-    setPan({ x: 16, y: 16 });
-  }
-
-  function pointerDistance(points: { x: number; y: number }[]) {
-    return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
-  }
-
-  function pointerCenter(points: { x: number; y: number }[]) {
-    return { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
-  }
-
-  function beginPinch() {
-    if (!viewportRef.current || activePointers.current.size < 2) return;
-    const rect = viewportRef.current.getBoundingClientRect();
-    const points = Array.from(activePointers.current.values()).slice(0, 2);
-    const center = pointerCenter(points);
-    const localCenter = { x: center.x - rect.left, y: center.y - rect.top };
-    pinch.current = {
-      distance: Math.max(1, pointerDistance(points)),
-      zoom,
-      pan,
-      center: localCenter,
-      mapPoint: {
-        x: (localCenter.x - pan.x) / zoom,
-        y: (localCenter.y - pan.y) / zoom
-      }
-    };
-    dragMoved.current = true;
-    setDrag(null);
+    centerView(STARTING_ZOOM);
   }
 
   function pointerDown(event: React.PointerEvent<HTMLDivElement>) {
     if ((event.target as HTMLElement).closest('[data-token]')) return;
     event.currentTarget.setPointerCapture(event.pointerId);
-    activePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (activePointers.current.size >= 2) {
-      beginPinch();
-      return;
-    }
-    dragMoved.current = false;
     setDrag({ id: event.pointerId, x: event.clientX, y: event.clientY, baseX: pan.x, baseY: pan.y, moved: false });
   }
 
   function pointerMove(event: React.PointerEvent<HTMLDivElement>) {
-    if (activePointers.current.has(event.pointerId)) activePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (pinch.current && activePointers.current.size >= 2) {
-      event.preventDefault();
-      const points = Array.from(activePointers.current.values()).slice(0, 2);
-      const center = pointerCenter(points);
-      const nextZoom = clamp(pinch.current.zoom * (pointerDistance(points) / pinch.current.distance), 0.4, 2);
-      const rect = viewportRef.current?.getBoundingClientRect();
-      const localCenter = rect ? { x: center.x - rect.left, y: center.y - rect.top } : pinch.current.center;
-      setZoom(nextZoom);
-      schedulePan({
-        x: localCenter.x - pinch.current.mapPoint.x * nextZoom,
-        y: localCenter.y - pinch.current.mapPoint.y * nextZoom
-      });
-      return;
-    }
     if (!drag || drag.id !== event.pointerId) return;
     const dx = event.clientX - drag.x;
     const dy = event.clientY - drag.y;
-    const moved = Math.abs(dx) + Math.abs(dy) > 7;
-    if (moved) dragMoved.current = true;
-    if (!drag.moved && moved) setDrag({ ...drag, moved: true });
-    schedulePan({ x: drag.baseX + dx, y: drag.baseY + dy });
+    setDrag({ ...drag, moved: drag.moved || Math.abs(dx) + Math.abs(dy) > 7 });
+    setPan({ x: drag.baseX + dx, y: drag.baseY + dy });
   }
 
   function pointerUp(event: React.PointerEvent<HTMLDivElement>) {
-    activePointers.current.delete(event.pointerId);
-    if (pinch.current) {
-      if (activePointers.current.size < 2) pinch.current = null;
-      dragMoved.current = false;
-      setDrag(null);
-      return;
-    }
     if (!drag || drag.id !== event.pointerId) return;
     const selected = combatants.find((entry) => entry.id === selectedId);
 
-    if (!drag.moved && !dragMoved.current && isDm && selected && viewportRef.current) {
+    if (!drag.moved && isDm && selected && viewportRef.current) {
       const rect = viewportRef.current.getBoundingClientRect();
       const x = Math.floor((event.clientX - rect.left - pan.x) / zoom / CELL_SIZE);
       const y = Math.floor((event.clientY - rect.top - pan.y) / zoom / CELL_SIZE);
       if (x >= 0 && x < battle.grid_width && y >= 0 && y < battle.grid_height) onMove(selected.id, x, y);
     }
-    dragMoved.current = false;
     setDrag(null);
   }
 
@@ -162,12 +112,7 @@ export default function BattleMap({ battle, combatants, profile, selectedId, onS
         onPointerDown={pointerDown}
         onPointerMove={pointerMove}
         onPointerUp={pointerUp}
-        onPointerCancel={() => {
-          activePointers.current.clear();
-          pinch.current = null;
-          dragMoved.current = false;
-          setDrag(null);
-        }}
+        onPointerCancel={() => setDrag(null)}
         onWheel={(event) => {
           if (!event.ctrlKey) return;
           event.preventDefault();
@@ -219,7 +164,7 @@ export default function BattleMap({ battle, combatants, profile, selectedId, onS
         </div>
 
         <div className="pointer-events-none absolute bottom-3 left-3 right-3 flex justify-center">
-          <div className="rounded-full border border-white/10 bg-[#0d1110f2] px-4 py-2 text-center text-[11px] font-bold text-[var(--muted)]">
+          <div className="rounded-full border border-white/10 bg-[#0d1110dc] px-4 py-2 text-center text-[11px] font-bold text-[var(--muted)] backdrop-blur">
             {isDm && selectedId ? <span className="flex items-center gap-2 text-[var(--brass)]"><Crosshair size={14} /> Tap a square to move · tap the token again to cancel</span> : 'Drag to move around the map · use controls to zoom'}
           </div>
         </div>
