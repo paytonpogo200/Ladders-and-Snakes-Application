@@ -108,6 +108,12 @@ export default function TradeModal({
     onClose();
   }
 
+  function chooseSender(characterId: string) {
+    setSenderId(characterId);
+    setOffered({});
+    rememberSelection(profile.id, 'trade-sender-character', characterId);
+  }
+
   function ItemChooser({ title, entries, selected, side }: { title: string; entries: InventoryItem[]; selected: Record<string, number>; side: 'offered' | 'requested' }) {
     return (
       <section>
@@ -165,8 +171,3 @@ export default function TradeModal({
     </Modal>
   );
 }
-  function chooseSender(characterId: string) {
-    setSenderId(characterId);
-    setOffered({});
-    rememberSelection(profile.id, 'trade-sender-character', characterId);
-  }
