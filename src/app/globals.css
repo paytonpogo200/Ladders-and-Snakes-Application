@@ -538,13 +538,11 @@ body.inventory-drag-active {
   box-shadow: 0 0 0 1px rgba(47, 191, 159, .34), 0 0 20px rgba(47, 191, 159, .2), inset 0 0 22px rgba(47, 191, 159, .08);
 }
 
-.inventory-enchanted-outline::after {
-  content: '';
-  position: absolute;
-  inset: 4px;
-  border: 1px solid rgba(86, 226, 194, .28);
-  border-radius: .7rem;
-  pointer-events: none;
+.loadout-filled.inventory-enchanted-outline,
+.loadout-enchanted-outline {
+  outline: 2px solid rgba(47, 191, 159, .88);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 1px rgba(47, 191, 159, .34), 0 0 24px rgba(47, 191, 159, .24), inset 0 0 22px rgba(47, 191, 159, .08);
 }
 
 .loadout-imbued-spell {
