@@ -25,6 +25,8 @@ export default function BattleMap({ battle, combatants, profile, selectedId, onS
   const panFrame = useRef<number | null>(null);
   const queuedPan = useRef<{ x: number; y: number } | null>(null);
   const dragMoved = useRef(false);
+  const activePointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ distance: number; zoom: number; pan: { x: number; y: number }; center: { x: number; y: number }; mapPoint: { x: number; y: number } } | null>(null);
   const size = useMemo(() => ({ width: battle.grid_width * CELL_SIZE, height: battle.grid_height * CELL_SIZE }), [battle]);
 
   useEffect(() => {
@@ -53,14 +55,62 @@ export default function BattleMap({ battle, combatants, profile, selectedId, onS
     setPan({ x: 16, y: 16 });
   }
 
+  function pointerDistance(points: { x: number; y: number }[]) {
+    return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+  }
+
+  function pointerCenter(points: { x: number; y: number }[]) {
+    return { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
+  }
+
+  function beginPinch() {
+    if (!viewportRef.current || activePointers.current.size < 2) return;
+    const rect = viewportRef.current.getBoundingClientRect();
+    const points = Array.from(activePointers.current.values()).slice(0, 2);
+    const center = pointerCenter(points);
+    const localCenter = { x: center.x - rect.left, y: center.y - rect.top };
+    pinch.current = {
+      distance: Math.max(1, pointerDistance(points)),
+      zoom,
+      pan,
+      center: localCenter,
+      mapPoint: {
+        x: (localCenter.x - pan.x) / zoom,
+        y: (localCenter.y - pan.y) / zoom
+      }
+    };
+    dragMoved.current = true;
+    setDrag(null);
+  }
+
   function pointerDown(event: React.PointerEvent<HTMLDivElement>) {
     if ((event.target as HTMLElement).closest('[data-token]')) return;
     event.currentTarget.setPointerCapture(event.pointerId);
+    activePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (activePointers.current.size >= 2) {
+      beginPinch();
+      return;
+    }
     dragMoved.current = false;
     setDrag({ id: event.pointerId, x: event.clientX, y: event.clientY, baseX: pan.x, baseY: pan.y, moved: false });
   }
 
   function pointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    if (activePointers.current.has(event.pointerId)) activePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pinch.current && activePointers.current.size >= 2) {
+      event.preventDefault();
+      const points = Array.from(activePointers.current.values()).slice(0, 2);
+      const center = pointerCenter(points);
+      const nextZoom = clamp(pinch.current.zoom * (pointerDistance(points) / pinch.current.distance), 0.4, 2);
+      const rect = viewportRef.current?.getBoundingClientRect();
+      const localCenter = rect ? { x: center.x - rect.left, y: center.y - rect.top } : pinch.current.center;
+      setZoom(nextZoom);
+      schedulePan({
+        x: localCenter.x - pinch.current.mapPoint.x * nextZoom,
+        y: localCenter.y - pinch.current.mapPoint.y * nextZoom
+      });
+      return;
+    }
     if (!drag || drag.id !== event.pointerId) return;
     const dx = event.clientX - drag.x;
     const dy = event.clientY - drag.y;
@@ -71,6 +121,13 @@ export default function BattleMap({ battle, combatants, profile, selectedId, onS
   }
 
   function pointerUp(event: React.PointerEvent<HTMLDivElement>) {
+    activePointers.current.delete(event.pointerId);
+    if (pinch.current) {
+      if (activePointers.current.size < 2) pinch.current = null;
+      dragMoved.current = false;
+      setDrag(null);
+      return;
+    }
     if (!drag || drag.id !== event.pointerId) return;
     const selected = combatants.find((entry) => entry.id === selectedId);
 
@@ -106,6 +163,8 @@ export default function BattleMap({ battle, combatants, profile, selectedId, onS
         onPointerMove={pointerMove}
         onPointerUp={pointerUp}
         onPointerCancel={() => {
+          activePointers.current.clear();
+          pinch.current = null;
           dragMoved.current = false;
           setDrag(null);
         }}

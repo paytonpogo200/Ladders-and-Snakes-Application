@@ -164,19 +164,32 @@ export default function BattleRoom({ profile }: { profile: Profile }) {
     } else useEnemyAsset(availableEnemies[0] ?? firstEnemy);
   }
 
+  function centeredTokenPosition(index: number, width = battle?.grid_width ?? 24, height = battle?.grid_height ?? 24) {
+    const columns = 5;
+    const xOffset = index % columns - Math.floor(columns / 2);
+    const yOffset = Math.floor(index / columns);
+    return {
+      x: Math.max(0, Math.min(width - 1, Math.floor(width / 2) + xOffset)),
+      y: Math.max(0, Math.min(height - 1, Math.floor(height / 2) + yOffset))
+    };
+  }
+
   async function startBattle() {
     if (!isDm || selectedIds.length === 0) return;
     setBusy(true);
     const { data: created, error } = await supabase.from('battles').insert({ created_by: profile.id, grid_width: 24, grid_height: 24 }).select('*').single();
     if (!error && created) {
-      const rows = characters.filter((entry) => selectedIds.includes(entry.id)).map((entry, index) => ({
-        battle_id: created.id,
-        character_id: entry.id,
-        x: 2 + (index % 5),
-        y: 2 + Math.floor(index / 5),
-        current_hp: entry.current_hp,
-        current_mana: entry.current_mana
-      }));
+      const rows = characters.filter((entry) => selectedIds.includes(entry.id)).map((entry, index) => {
+        const position = centeredTokenPosition(index, created.grid_width, created.grid_height);
+        return {
+          battle_id: created.id,
+          character_id: entry.id,
+          x: position.x,
+          y: position.y,
+          current_hp: entry.current_hp,
+          current_mana: entry.current_mana
+        };
+      });
       await supabase.from('combatants').insert(rows);
       setSelectedIds([]);
       await loadBattle();
@@ -248,11 +261,12 @@ export default function BattleRoom({ profile }: { profile: Profile }) {
       token_color: enemy.token_color
     }).select('*').single();
     if (data) {
+      const position = centeredTokenPosition(combatants.length);
       await supabase.from('combatants').insert({
         battle_id: battle.id,
         character_id: data.id,
-        x: 8 + (combatants.length % 5),
-        y: 8 + Math.floor(combatants.length / 5),
+        x: position.x,
+        y: position.y,
         current_hp: hp,
         current_mana: mana
       });
