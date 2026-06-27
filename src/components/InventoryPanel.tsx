@@ -7,7 +7,7 @@ import NumberInput from '@/components/NumberInput';
 import Modal from '@/components/Modal';
 import { rarityClass } from '@/lib/rarity';
 import { createDebouncedRefresh } from '@/lib/realtime';
-import type { Character, CharacterTransferCapacity, InventoryItem, InventoryItemType, Profile, Spell } from '@/lib/types';
+import { ATTRIBUTE_KEYS, ATTRIBUTE_LABELS, type Character, type CharacterAttributes, type CharacterTransferCapacity, type InventoryItem, type InventoryItemType, type Profile, type Spell } from '@/lib/types';
 
 const itemTypes: { value: InventoryItemType; label: string; icon: LucideIcon }[] = [
   { value: 'weapon', label: 'Weapon', icon: Sword },
@@ -28,7 +28,40 @@ const legacyItemTypes: { value: InventoryItemType; label: string; icon: LucideIc
   { value: 'consumable', label: 'Consumable', icon: FlaskConical }
 ];
 
-type InventoryItemWithLock = InventoryItem & { is_trade_locked?: boolean | null };
+type AttributeModifierMap = Partial<Record<keyof CharacterAttributes, number>>;
+type ModifierFormState = Record<keyof CharacterAttributes, string>;
+type InventoryItemWithLock = InventoryItem & { is_trade_locked?: boolean | null; modifiers?: AttributeModifierMap | null };
+
+function emptyModifierForm(): ModifierFormState {
+  return Object.fromEntries(ATTRIBUTE_KEYS.map((key) => [key, ''])) as ModifierFormState;
+}
+
+function modifierNumber(value: unknown) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : 0;
+}
+
+function modifierFormFromItem(modifiers?: AttributeModifierMap | null): ModifierFormState {
+  const form = emptyModifierForm();
+  ATTRIBUTE_KEYS.forEach((key) => {
+    const value = modifierNumber(modifiers?.[key]);
+    if (value !== 0) form[key] = String(value);
+  });
+  return form;
+}
+
+function hasModifierValues(modifiers?: AttributeModifierMap | null) {
+  return ATTRIBUTE_KEYS.some((key) => modifierNumber(modifiers?.[key]) !== 0);
+}
+
+function cleanModifierInput(input: ModifierFormState): AttributeModifierMap {
+  return ATTRIBUTE_KEYS.reduce((modifiers, key) => {
+    const raw = input[key];
+    const value = Number(raw);
+    if (raw !== '' && Number.isFinite(value) && value !== 0) modifiers[key] = value;
+    return modifiers;
+  }, {} as AttributeModifierMap);
+}
 
 function imbuedSpellName(notes?: string | null) {
   return notes?.match(/Imbued spell:\s*([^\n]+)/i)?.[1]?.trim() ?? '';
@@ -90,7 +123,9 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     equipped: false,
     storage_capacity: 0,
     legendary_weapon: false,
-    legendary_description: ''
+    legendary_description: '',
+    modifiers_enabled: false,
+    modifiers: emptyModifierForm()
   });
 
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null;
@@ -279,7 +314,9 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
       equipped: item.equipped,
       storage_capacity: item.storage_capacity ?? 0,
       legendary_weapon: item.rarity === 'Legendary' && itemTypeValue(item) === 'weapon',
-      legendary_description: legendaryDescription(item.notes)
+      legendary_description: legendaryDescription(item.notes),
+      modifiers_enabled: hasModifierValues(item.modifiers),
+      modifiers: modifierFormFromItem(item.modifiers)
     });
   }
 
@@ -289,7 +326,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     setEmptyTarget({ slot, parentId });
     setAction('inspect');
     setMessage('');
-    setForm({ item_name: '', quantity: 1, item_type: 'misc', imbued_spell_id: '', equipped: false, storage_capacity: 0, legendary_weapon: false, legendary_description: '' });
+    setForm({ item_name: '', quantity: 1, item_type: 'misc', imbued_spell_id: '', equipped: false, storage_capacity: 0, legendary_weapon: false, legendary_description: '', modifiers_enabled: false, modifiers: emptyModifierForm() });
   }
 
   function closeEditor() {
@@ -315,7 +352,8 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
           : imbueNotes(spellName)
         : '',
       rarity: isLegendaryWeapon ? 'Legendary' : (selectedItem?.rarity ?? 'Common'),
-      equipped: form.equipped
+      equipped: form.equipped,
+      modifiers: form.modifiers_enabled ? cleanModifierInput(form.modifiers) : {}
     };
 
     const result = selectedItem
@@ -499,6 +537,32 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
                       <span className="text-xs leading-5 text-[var(--muted)]">Gives the item the smoother Legendary gold/brass effect and stores its unique ability.</span>
                       {form.legendary_weapon && (
                         <textarea className="field min-h-20" value={form.legendary_description} onChange={(event) => setForm({ ...form, legendary_description: event.target.value })} placeholder="What does this legendary weapon do?" />
+                      )}
+                    </span>
+                  </label>
+                )}
+                {!selectedItem?.is_storage && (
+                  <label className="flex items-start gap-3 rounded-xl border border-[#d1a85b45] bg-[#d1a85b0d] p-3 sm:col-span-2">
+                    <input type="checkbox" className="mt-1" checked={form.modifiers_enabled} onChange={(event) => setForm({ ...form, modifiers_enabled: event.target.checked })} />
+                    <span className="grid flex-1 gap-2">
+                      <span className="text-xs font-black uppercase tracking-wider text-[var(--brass)]">Item modifiers</span>
+                      <span className="text-xs leading-5 text-[var(--muted)]">Only applies while this item is in an active loadout slot.</span>
+                      {form.modifiers_enabled && (
+                        <div className="modifier-input-grid">
+                          {ATTRIBUTE_KEYS.map((key) => (
+                            <label key={key}>
+                              <span>{ATTRIBUTE_LABELS[key]}</span>
+                              <input
+                                className="field px-2 py-2 text-center"
+                                type="number"
+                                step="1"
+                                value={form.modifiers[key]}
+                                onChange={(event) => setForm({ ...form, modifiers: { ...form.modifiers, [key]: event.target.value } })}
+                                placeholder="0"
+                              />
+                            </label>
+                          ))}
+                        </div>
                       )}
                     </span>
                   </label>

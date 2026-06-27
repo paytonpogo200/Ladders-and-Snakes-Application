@@ -10,6 +10,7 @@ import TamedBeastsPanel from '@/components/TamedBeastsPanel';
 import PropertyPanel from '@/components/PropertyPanel';
 import { classAssetToPreset, getClassPreset, type ClassPreset } from '@/lib/classPresets';
 import { formatCurrency, signed } from '@/lib/format';
+import { rarityClass } from '@/lib/rarity';
 import {
   ATTRIBUTE_KEYS,
   ATTRIBUTE_LABELS,
@@ -44,6 +45,45 @@ const grantItemTypes: { value: InventoryItemType; label: string }[] = [
 ];
 
 type LoadoutSlotKey = 'weapon' | 'armor' | 'shield' | 'pet';
+type AttributeModifierMap = Partial<Record<keyof CharacterAttributes, number>>;
+type ModifierFormState = Record<keyof CharacterAttributes, string>;
+type InventoryItemWithModifiers = InventoryItem & { modifiers?: AttributeModifierMap | null };
+
+function emptyModifierForm(): ModifierFormState {
+  return Object.fromEntries(ATTRIBUTE_KEYS.map((key) => [key, ''])) as ModifierFormState;
+}
+
+function cleanModifierInput(input: ModifierFormState): AttributeModifierMap {
+  return ATTRIBUTE_KEYS.reduce((modifiers, key) => {
+    const raw = input[key];
+    const value = Number(raw);
+    if (raw !== '' && Number.isFinite(value) && value !== 0) modifiers[key] = value;
+    return modifiers;
+  }, {} as AttributeModifierMap);
+}
+
+function modifierNumber(value: unknown) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : 0;
+}
+
+function modifierLines(item?: InventoryItemWithModifiers | null) {
+  const modifiers = item?.modifiers ?? {};
+  return ATTRIBUTE_KEYS.map((key) => ({ key, label: ATTRIBUTE_LABELS[key], value: modifierNumber(modifiers[key]) }))
+    .filter((entry) => entry.value !== 0);
+}
+
+function formatModifier(value: number) {
+  return `${value > 0 ? '+' : ''}${value}`;
+}
+
+function applyActiveModifiers(base: CharacterAttributes, modifiers: AttributeModifierMap): CharacterAttributes {
+  const result = { ...base };
+  ATTRIBUTE_KEYS.forEach((key) => {
+    result[key] = (result[key] ?? 0) + modifierNumber(modifiers[key]);
+  });
+  return result;
+}
 
 function imbueNotes(spellName: string) {
   return spellName ? `Imbued spell: ${spellName}` : '';
@@ -95,7 +135,7 @@ export default function CharacterSheet({
   const [wallets, setWallets] = useState<CharacterWallet[]>([]);
   const [products, setProducts] = useState<MarketProduct[]>([]);
   const [spells, setSpells] = useState<Spell[]>([]);
-  const [equipmentItems, setEquipmentItems] = useState<InventoryItem[]>([]);
+  const [equipmentItems, setEquipmentItems] = useState<InventoryItemWithModifiers[]>([]);
   const [properties, setProperties] = useState<CharacterProperty[]>([]);
   const [currencyForm, setCurrencyForm] = useState({ denomination_id: '', amount: 1 });
   const [grantMode, setGrantMode] = useState<'catalog' | 'custom'>('catalog');
@@ -108,10 +148,26 @@ export default function CharacterSheet({
     imbued_spell_id: '',
     storage_capacity: 0,
     legendary_weapon: false,
-    legendary_description: ''
+    legendary_description: '',
+    modifiers_enabled: false,
+    modifiers: emptyModifierForm()
   });
   const [toolMessage, setToolMessage] = useState('');
   const [hoveredLoadoutSlot, setHoveredLoadoutSlot] = useState<LoadoutSlotKey | null>(null);
+
+  function resetGrantForm() {
+    setGrantForm({
+      name: '',
+      quantity: 1,
+      item_type: 'misc',
+      imbued_spell_id: '',
+      storage_capacity: 0,
+      legendary_weapon: false,
+      legendary_description: '',
+      modifiers_enabled: false,
+      modifiers: emptyModifierForm()
+    });
+  }
 
   useEffect(() => {
     const supabase = createClient();
@@ -144,7 +200,7 @@ export default function CharacterSheet({
       supabase.from('inventory_items').select('*').eq('character_id', character.id).eq('equipped', true).order('updated_at', { ascending: false }),
       supabase.from('character_properties').select('*').eq('character_id', character.id).order('created_at')
     ]);
-    if (!itemResult.error) setEquipmentItems((itemResult.data ?? []) as InventoryItem[]);
+    if (!itemResult.error) setEquipmentItems((itemResult.data ?? []) as InventoryItemWithModifiers[]);
     if (!propertyResult.error) setProperties((propertyResult.data ?? []) as CharacterProperty[]);
   }
 
@@ -183,6 +239,7 @@ export default function CharacterSheet({
     const selectedSpell = spells.find((spell) => spell.id === grantForm.imbued_spell_id);
     const itemType = String(grantForm.item_type);
     const isLegendaryWeapon = itemType === 'weapon' && grantForm.legendary_weapon;
+    const itemModifiers = grantForm.modifiers_enabled ? cleanModifierInput(grantForm.modifiers) : {};
 
     const result = grantMode === 'catalog'
       ? await supabase.rpc('dm_grant_market_item', {
@@ -202,12 +259,13 @@ export default function CharacterSheet({
           item_type_input: grantForm.item_type,
           storage_capacity_input: Math.max(0, Number(grantForm.storage_capacity) || 0),
           rarity_input: isLegendaryWeapon ? 'Legendary' : 'Common',
-          trade_locked_input: false
+          trade_locked_input: false,
+          modifiers_input: itemModifiers
         });
 
     setToolMessage(result.error ? result.error.message : 'Item added to the character.');
     if (!result.error) {
-      setGrantForm({ name: '', quantity: 1, item_type: 'misc', imbued_spell_id: '', storage_capacity: 0, legendary_weapon: false, legendary_description: '' });
+      resetGrantForm();
       await loadLoadoutStrip();
       onSaved();
     }
@@ -265,7 +323,16 @@ export default function CharacterSheet({
     }
   }
 
-  const shownAttributes = editing ? form.attributes : attributes;
+  const activeAttributeModifiers = useMemo(() => {
+    return equipmentItems.reduce((totals, item) => {
+      const itemModifiers = item.modifiers ?? {};
+      ATTRIBUTE_KEYS.forEach((key) => {
+        totals[key] = (totals[key] ?? 0) + modifierNumber(itemModifiers[key]);
+      });
+      return totals;
+    }, { ...DEFAULT_ATTRIBUTES } as CharacterAttributes);
+  }, [equipmentItems]);
+  const shownAttributes = editing ? form.attributes : applyActiveModifiers(attributes, activeAttributeModifiers);
   const personalPassives = (editing ? form.personal_passives : character.notes ?? '').trim();
   const personalPassiveLines = personalPassives.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const equippedWeapon = equipmentItems.find((item) => typeOfItem(item) === 'weapon') ?? null;
@@ -274,11 +341,28 @@ export default function CharacterSheet({
   const activePetItem = equipmentItems.find((item) => typeOfItem(item) === 'pet') ?? null;
   const activeAnimal = properties.find((entry) => entry.property_type === 'animal') ?? null;
 
-  function LoadoutSlot({ label, slot, value, icon: Icon }: { label: string; slot: LoadoutSlotKey; value: string; icon: LucideIcon }) {
+  function LoadoutSlot({
+    label,
+    slot,
+    item,
+    fallbackName,
+    icon: Icon
+  }: {
+    label: string;
+    slot: LoadoutSlotKey;
+    item?: InventoryItemWithModifiers | null;
+    fallbackName?: string;
+    icon: LucideIcon;
+  }) {
     const active = hoveredLoadoutSlot === slot;
+    const hasItem = Boolean(item);
+    const hasValue = hasItem || Boolean(fallbackName);
+    const displayName = item?.item_name ?? fallbackName ?? 'Empty';
+    const lines = modifierLines(item);
+    const filledClass = item ? `loadout-filled rarity-card ${rarityClass(item.rarity)}` : '';
     return (
       <div
-        className={`loadout-drop-slot surface-soft min-h-20 rounded-xl border p-3 ${active ? 'loadout-drop-slot-active' : ''}`}
+        className={`loadout-drop-slot surface-soft min-h-24 rounded-xl border p-3 ${filledClass} ${active ? 'loadout-drop-slot-active' : ''}`}
         onDragOver={(event) => {
           event.preventDefault();
           event.dataTransfer.dropEffect = 'move';
@@ -292,8 +376,22 @@ export default function CharacterSheet({
           <Icon size={15} />
           <span className="text-[10px] font-black uppercase tracking-wider">{label}</span>
         </div>
-        <p className="text-sm font-black leading-5">{value}</p>
-        <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">Drop eligible item here</p>
+        <p className="text-sm font-black leading-5">{displayName}</p>
+        {hasValue ? (
+          lines.length > 0 ? (
+            <div className="loadout-modifier-lines">
+              {lines.map((line) => (
+                <span key={line.key} className={line.value > 0 ? 'loadout-modifier-positive' : 'loadout-modifier-negative'}>
+                  {formatModifier(line.value)} {line.label}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className="loadout-empty-detail" aria-hidden="true" />
+          )
+        ) : (
+          <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">Drop eligible item here</p>
+        )}
       </div>
     );
   }
@@ -444,6 +542,30 @@ export default function CharacterSheet({
                   </span>
                 </label>
               )}
+              <label className="flex items-start gap-3 rounded-xl border border-[#d1a85b45] bg-[#d1a85b0d] p-3 sm:col-span-2">
+                <input type="checkbox" className="mt-1" checked={grantForm.modifiers_enabled} onChange={(event) => setGrantForm({ ...grantForm, modifiers_enabled: event.target.checked })} />
+                <span className="grid flex-1 gap-2">
+                  <span className="text-xs font-black uppercase tracking-wider text-[var(--brass)]">Item modifiers</span>
+                  <span className="text-xs leading-5 text-[var(--muted)]">Only applies while this item is in an active loadout slot.</span>
+                  {grantForm.modifiers_enabled && (
+                    <div className="modifier-input-grid">
+                      {ATTRIBUTE_KEYS.map((key) => (
+                        <label key={key}>
+                          <span>{ATTRIBUTE_LABELS[key]}</span>
+                          <input
+                            className="field px-2 py-2 text-center"
+                            type="number"
+                            step="1"
+                            value={grantForm.modifiers[key]}
+                            onChange={(event) => setGrantForm({ ...grantForm, modifiers: { ...grantForm.modifiers, [key]: event.target.value } })}
+                            placeholder="0"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </span>
+              </label>
             </div>
           )}
           <button type="button" onClick={grantItem} disabled={grantMode === 'custom' && !grantForm.name.trim()} className="primary-button mt-2 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 font-black disabled:opacity-40"><Gift size={17} /> Give item</button>
@@ -555,10 +677,10 @@ export default function CharacterSheet({
           <h4 className="text-sm font-black uppercase tracking-wider">Loadout</h4>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <LoadoutSlot label="Armor" slot="armor" icon={Shield} value={equippedArmor?.item_name ?? 'Empty'} />
-          <LoadoutSlot label="Weapon" slot="weapon" icon={Sword} value={equippedWeapon?.item_name ?? 'Empty'} />
-          <LoadoutSlot label="Shield" slot="shield" icon={Shield} value={equippedShield?.item_name ?? 'Empty'} />
-          <LoadoutSlot label="Active pet" slot="pet" icon={PawPrint} value={activePetItem?.item_name ?? (activeAnimal?.custom_name || activeAnimal?.property_name || 'Empty')} />
+          <LoadoutSlot label="Armor" slot="armor" icon={Shield} item={equippedArmor} />
+          <LoadoutSlot label="Weapon" slot="weapon" icon={Sword} item={equippedWeapon} />
+          <LoadoutSlot label="Shield" slot="shield" icon={Shield} item={equippedShield} />
+          <LoadoutSlot label="Active pet" slot="pet" icon={PawPrint} item={activePetItem} fallbackName={activeAnimal?.custom_name || activeAnimal?.property_name || undefined} />
         </div>
       </section>
 
