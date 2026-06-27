@@ -464,3 +464,70 @@ body.inventory-drag-active {
     align-items: start;
   }
 }
+
+.loadout-filled {
+  min-height: 6.15rem;
+  border-width: 2px;
+  background-clip: padding-box, border-box;
+}
+
+.loadout-filled .text-\[var\(--brass\)\] {
+  text-shadow: 0 0 10px rgba(224, 166, 78, .18);
+}
+
+.loadout-empty-detail {
+  min-height: 1.35rem;
+  margin-top: .25rem;
+}
+
+.loadout-modifier-lines {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem;
+  margin-top: .45rem;
+}
+
+.loadout-modifier-lines span {
+  border: 1px solid rgba(224, 166, 78, .22);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .24);
+  padding: .12rem .38rem;
+  font-size: .62rem;
+  font-weight: 950;
+  line-height: .9rem;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+.loadout-modifier-positive {
+  color: var(--teal);
+}
+
+.loadout-modifier-negative {
+  color: var(--red);
+}
+
+.modifier-input-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .45rem;
+}
+
+@media (min-width: 640px) {
+  .modifier-input-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.modifier-input-grid label {
+  display: grid;
+  gap: .25rem;
+}
+
+.modifier-input-grid label > span {
+  color: var(--muted);
+  font-size: .61rem;
+  font-weight: 950;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
