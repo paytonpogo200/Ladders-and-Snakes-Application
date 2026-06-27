@@ -163,6 +163,21 @@ export const CLASS_PRESETS: ClassPreset[] = [
     ]
   },
   {
+    key: 'the-muscle',
+    name: 'The Muscle',
+    type: 'Defense · Great sustain',
+    armor: 'Medium armor',
+    identity: 'Notorious for a large frame and small brains, built to soak punishment and become the group’s blunt-force answer.',
+    inventorySlots: 10,
+    spellSlots: 1,
+    health: 150,
+    mana: 40,
+    attributes: stats({ strength: 3, agility: -1, vitality: 1, intelligence: -3, recovery: 2, charisma: -2, accuracy: -2, range: -2, perception: -1, alchemy: -2, stealth: -2 }),
+    passives: [
+      'When The Muscle kills an enemy, gain 1d6 for ensuing damage rolls. Resets after each combat or scene ends. Max of 5d6.'
+    ]
+  },
+  {
     key: 'ranger',
     name: 'Ranger',
     type: 'Attack · Poor sustain',
@@ -226,6 +241,22 @@ export const CLASS_PRESETS: ClassPreset[] = [
       'Begins with three random low-level runes.',
       'Requires only three runes to force a spell into a weapon instead of five; additional runes improve the result.',
       'Each spell-infused weapon on hand can cast its spell twice per combat.'
+    ]
+  },
+  {
+    key: 'warden',
+    name: 'Warden',
+    type: 'Hybrid · Decent sustain',
+    armor: 'Medium armor',
+    identity: 'Jack-of-all-trades survivalists with broad usefulness, cunning instincts, and flexible party support.',
+    inventorySlots: 20,
+    spellSlots: 3,
+    health: 110,
+    mana: 75,
+    attributes: stats({ charisma: -2, perception: 2, alchemy: 1 }),
+    passives: [
+      'Once per combat or exploration scene, reroll a failed Perception, Alchemy, Survival, or Utility check.',
+      'Gains a +2 modifier of choice in a single category where the party has no bonuses.'
     ]
   }
 ];

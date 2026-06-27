@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Apple, Box, Check, ChevronDown, FlaskConical, Leaf, PackageOpen, Pickaxe, Plus, ScrollText, Send, Shield, Shirt, Sword, Trash2, Wrench, X } from 'lucide-react';
+import { AlertTriangle, Apple, Box, Check, ChevronDown, FlaskConical, Home, Leaf, PackageOpen, Pickaxe, Plus, ScrollText, Send, Shield, Shirt, Sword, Trash2, Wrench, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import NumberInput from '@/components/NumberInput';
 import Modal from '@/components/Modal';
@@ -44,7 +44,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [emptyTarget, setEmptyTarget] = useState<{ slot: number; parentId: string | null } | null>(null);
-  const [action, setAction] = useState<'inspect' | 'drop' | 'give'>('inspect');
+  const [action, setAction] = useState<'inspect' | 'drop' | 'give' | 'house'>('inspect');
   const [message, setMessage] = useState('');
   const [characters, setCharacters] = useState<Character[]>([]);
   const [capacities, setCapacities] = useState<CharacterTransferCapacity[]>([]);
@@ -203,6 +203,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
 
   function beginLongPress(item: InventoryItem, event: React.PointerEvent<HTMLButtonElement>) {
     if (!mayManage || item.is_storage || event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
     if (dragTimer.current) clearTimeout(dragTimer.current);
     dragCandidate.current = { item, x: event.clientX, y: event.clientY };
     dragTimer.current = setTimeout(() => {
@@ -312,6 +313,20 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     setMessage('Transfer request sent. It will remain available until accepted, declined, or cancelled.');
     setAction('inspect');
     await loadTransferOptions();
+  }
+
+  async function sendToHouse() {
+    if (!selectedItem) return;
+    setBusy(true);
+    setMessage('');
+    const { error } = await supabase.rpc('move_inventory_item_to_house', {
+      target_source_item_id: selectedItem.id,
+      move_quantity: Math.max(1, Math.min(selectedItem.quantity, actionQuantity || 1))
+    });
+    setBusy(false);
+    if (error) return setMessage(error.message);
+    closeEditor();
+    await loadItems();
   }
 
   function renderSlot(item: InventoryItem | undefined, slot: number, parentId: string | null) {
@@ -424,7 +439,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
 
             {selectedItem && action !== 'inspect' && (
               <section className="rounded-xl border border-[var(--line)] bg-black/20 p-3">
-                <div className="mb-3 flex items-center justify-between"><h6 className="font-black">{action === 'drop' ? 'Drop item' : 'Give item'}</h6><button type="button" onClick={() => setAction('inspect')} className="rounded-lg border border-[var(--line)] p-1.5"><X size={15} /></button></div>
+                <div className="mb-3 flex items-center justify-between"><h6 className="font-black">{action === 'drop' ? 'Drop item' : action === 'give' ? 'Give item' : 'Send to house'}</h6><button type="button" onClick={() => setAction('inspect')} className="rounded-lg border border-[var(--line)] p-1.5"><X size={15} /></button></div>
                 {action === 'give' && (
                   <label className="mb-2 block">
                     <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Send to</span>
@@ -437,9 +452,9 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
                   </label>
                 )}
                 <label><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Amount</span><NumberInput className="field" min={1} max={selectedItem.quantity} value={actionQuantity} onValueChange={setActionQuantity} /></label>
-                {action === 'give' && !selectedItem.is_storage && targetCapacity <= 0 && <p className="mt-2 flex items-center gap-2 text-xs font-bold text-[var(--red)]"><AlertTriangle size={14} /> That character’s inventory is full.</p>}
-                <button type="button" onClick={action === 'drop' ? dropItem : requestTransfer} disabled={busy || (action === 'give' && !selectedItem.is_storage && targetCapacity <= 0)} className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 font-black disabled:opacity-40 ${action === 'drop' ? 'border border-[#d76a6255] text-[var(--red)]' : 'teal-button'}`}>
-                  {action === 'drop' ? <Trash2 size={17} /> : <Send size={17} />} {busy ? 'Working…' : action === 'drop' ? `Drop ${Math.max(1, actionQuantity)}` : `Send ${Math.max(1, actionQuantity)}`}
+                {action === 'give' && !selectedItem.is_storage && targetCapacity <= 0 && <p className="mt-2 flex items-center gap-2 text-xs font-bold text-[var(--red)]"><AlertTriangle size={14} /> That character?s inventory is full.</p>}
+                <button type="button" onClick={action === 'drop' ? dropItem : action === 'give' ? requestTransfer : sendToHouse} disabled={busy || (action === 'give' && !selectedItem.is_storage && targetCapacity <= 0)} className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 font-black disabled:opacity-40 ${action === 'drop' ? 'border border-[#d76a6255] text-[var(--red)]' : 'teal-button'}`}>
+                  {action === 'drop' ? <Trash2 size={17} /> : action === 'give' ? <Send size={17} /> : <Home size={17} />} {busy ? 'Working...' : action === 'drop' ? `Drop ${Math.max(1, actionQuantity)}` : action === 'give' ? `Send ${Math.max(1, actionQuantity)}` : `Store ${Math.max(1, actionQuantity)}`}
                 </button>
               </section>
             )}
@@ -449,6 +464,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
               <div className="mt-3 flex flex-wrap gap-2">
                 {selectedItem && mayManage && <button type="button" onClick={() => { setAction('drop'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#d76a6255] px-4 py-3 text-sm font-black text-[var(--red)]"><Trash2 size={17} /> Drop</button>}
                 {selectedItem && mayManage && characters.length > 0 && <button type="button" onClick={() => { setAction('give'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#9caf7955] px-4 py-3 text-sm font-black text-[var(--teal)]"><Send size={17} /> Give</button>}
+                {selectedItem && mayManage && <button type="button" onClick={() => { setAction('house'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#e0a64e55] px-4 py-3 text-sm font-black text-[var(--brass)]"><Home size={17} /> House</button>}
                 {canEdit && <button disabled={busy} className="primary-button min-w-32 flex-1 rounded-xl px-4 py-3 font-black">{selectedItem ? 'Save item' : 'Add item'}</button>}
               </div>
             )}

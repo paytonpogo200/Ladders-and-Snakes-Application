@@ -189,6 +189,7 @@ export default function HousePanel({
               <NumberInput className="field" min={1} max={selectedHouseItem.quantity} value={quantity} onValueChange={setQuantity} aria-label="House withdrawal quantity" />
               <button onClick={withdraw} disabled={busy || !targetCharacterId} className="teal-button flex items-center justify-center gap-2 rounded-xl px-4 py-3 font-black disabled:opacity-40"><LogOut size={16} /> Pack</button>
             </div>
+            <p className="mt-2 text-xs font-bold text-[var(--muted)]">Packs into open inventory first, then additional storage if needed.</p>
           </section>
         )}
 
