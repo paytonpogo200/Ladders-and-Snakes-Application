@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import Modal from '@/components/Modal';
 import NumberInput from '@/components/NumberInput';
 import { rarityClass } from '@/lib/rarity';
+import { readRememberedSelection, rememberSelection } from '@/lib/selectionMemory';
 import type { Character, CurrencyDenomination, CurrencySystem, InventoryItem, Profile } from '@/lib/types';
 
 export default function TradeModal({
@@ -48,7 +49,10 @@ export default function TradeModal({
     ]).then(([characterResult, itemResult, systemResult, denominationResult]) => {
       const mine = ((characterResult.data ?? []) as Character[]).filter((entry) => entry.owner_user_id === profile.id);
       setCharacters(mine);
-      if (!senderId && mine[0]) setSenderId(mine[0].id);
+      if (!senderId && mine[0]) {
+        const remembered = readRememberedSelection(profile.id, 'trade-sender-character');
+        setSenderId(mine.some((entry) => entry.id === remembered) ? remembered : mine[0].id);
+      }
       setItems((itemResult.data ?? []) as InventoryItem[]);
       setSystems((systemResult.data ?? []) as CurrencySystem[]);
       const loadedDenominations = (denominationResult.data ?? []) as CurrencyDenomination[];
@@ -136,7 +140,7 @@ export default function TradeModal({
           <button onClick={onClose} className="rounded-lg border border-[var(--line)] p-2 text-[var(--muted)]"><X size={17} /></button>
         </div>
 
-        <label className="mt-4 block"><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Trading as</span><select className="field" value={sender?.id ?? ''} onChange={(event) => { setSenderId(event.target.value); setOffered({}); }}>{characters.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>
+        <label className="mt-4 block"><span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Trading as</span><select className="field" value={sender?.id ?? ''} onChange={(event) => chooseSender(event.target.value)}>{characters.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>
 
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
           <ItemChooser title={`${sender?.name ?? 'You'} offers`} entries={senderItems} selected={offered} side="offered" />
@@ -161,3 +165,8 @@ export default function TradeModal({
     </Modal>
   );
 }
+  function chooseSender(characterId: string) {
+    setSenderId(characterId);
+    setOffered({});
+    rememberSelection(profile.id, 'trade-sender-character', characterId);
+  }

@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import NumberInput from '@/components/NumberInput';
 import { rarityClass } from '@/lib/rarity';
 import { createDebouncedRefresh } from '@/lib/realtime';
+import { readRememberedSelection, rememberSelection } from '@/lib/selectionMemory';
 import type { Character, HouseInventoryItem, InventoryItem, PlayerHouse, Profile } from '@/lib/types';
 
 export default function HousePanel({
@@ -23,7 +24,7 @@ export default function HousePanel({
   const [carriedItems, setCarriedItems] = useState<InventoryItem[]>([]);
   const [sourceItemId, setSourceItemId] = useState('');
   const [selectedHouseItemId, setSelectedHouseItemId] = useState('');
-  const [targetCharacterId, setTargetCharacterId] = useState(characters[0]?.id ?? '');
+  const [targetCharacterId, setTargetCharacterId] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -60,7 +61,8 @@ export default function HousePanel({
   }
 
   useEffect(() => {
-    setTargetCharacterId(characters[0]?.id ?? '');
+    const remembered = readRememberedSelection(profile.id, 'house-target-character');
+    setTargetCharacterId(characters.some((entry) => entry.id === remembered) ? remembered : characters[0]?.id ?? '');
     loadHouse();
   }, [ownerUserId, characters.map((entry) => entry.id).join(',')]);
 
@@ -79,6 +81,11 @@ export default function HousePanel({
 
   const selectedHouseItem = houseItems.find((entry) => entry.id === selectedHouseItemId) ?? null;
   const sourceItem = carriedItems.find((entry) => entry.id === sourceItemId) ?? null;
+
+  function chooseTargetCharacter(characterId: string) {
+    setTargetCharacterId(characterId);
+    rememberSelection(profile.id, 'house-target-character', characterId);
+  }
 
   function sourceLabel(item: InventoryItem) {
     const owner = characters.find((entry) => entry.id === item.character_id);
@@ -176,7 +183,7 @@ export default function HousePanel({
               <button onClick={dropHouseItem} className="rounded-lg border border-[#d2735855] p-2 text-[var(--red)]"><Trash2 size={16} /></button>
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_6rem_auto]">
-              <select className="field" value={targetCharacterId} onChange={(event) => setTargetCharacterId(event.target.value)}>
+              <select className="field" value={targetCharacterId} onChange={(event) => chooseTargetCharacter(event.target.value)}>
                 {characters.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
               </select>
               <NumberInput className="field" min={1} max={selectedHouseItem.quantity} value={quantity} onValueChange={setQuantity} aria-label="House withdrawal quantity" />

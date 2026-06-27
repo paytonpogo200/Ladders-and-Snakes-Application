@@ -11,6 +11,7 @@ import HousePanel from '@/components/HousePanel';
 import NumberInput from '@/components/NumberInput';
 import Modal from '@/components/Modal';
 import { createDebouncedRefresh } from '@/lib/realtime';
+import { readRememberedSelection, rememberSelection } from '@/lib/selectionMemory';
 import type {
   CampaignLocation,
   Character,
@@ -85,7 +86,10 @@ export default function CitiesPanel({ profile }: { profile: Profile }) {
       const loaded = (characterResult.data ?? []) as Character[];
       setCharacters(loaded);
       const mine = isDm ? loaded : loaded.filter((entry) => entry.owner_user_id === profile.id);
-      if (!selectedCharacterId && mine[0]) setSelectedCharacterId(mine[0].id);
+      if (!selectedCharacterId && mine[0]) {
+        const remembered = readRememberedSelection(profile.id, 'shopping-character');
+        setSelectedCharacterId(mine.some((entry) => entry.id === remembered) ? remembered : mine[0].id);
+      }
     }
     if (!walletResult.error) setWallets((walletResult.data ?? []) as CharacterWallet[]);
     if (!campaignLocationResult.error) setCampaignLocations((campaignLocationResult.data ?? []) as CampaignLocation[]);
@@ -109,8 +113,16 @@ export default function CitiesPanel({ profile }: { profile: Profile }) {
   }, []);
 
   useEffect(() => {
-    if (!selectedCharacterId && visibleCharacters[0]) setSelectedCharacterId(visibleCharacters[0].id);
+    if (visibleCharacters.length === 0) return;
+    if (selectedCharacterId && visibleCharacters.some((entry) => entry.id === selectedCharacterId)) return;
+    const remembered = readRememberedSelection(profile.id, 'shopping-character');
+    setSelectedCharacterId(visibleCharacters.some((entry) => entry.id === remembered) ? remembered : visibleCharacters[0].id);
   }, [visibleCharacters.length]);
+
+  function chooseShoppingCharacter(characterId: string) {
+    setSelectedCharacterId(characterId);
+    rememberSelection(profile.id, 'shopping-character', characterId);
+  }
 
   useEffect(() => {
     if (!selectedProduct || cityDenominations.length === 0) return;
@@ -314,7 +326,7 @@ export default function CitiesPanel({ profile }: { profile: Profile }) {
           <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
             <label>
               <span className="mb-1 block text-[10px] font-black uppercase tracking-wider text-[var(--muted)]">Shopping as</span>
-              <select className="field" value={selectedCharacter?.id ?? ''} onChange={(event) => setSelectedCharacterId(event.target.value)}>
+              <select className="field" value={selectedCharacter?.id ?? ''} onChange={(event) => chooseShoppingCharacter(event.target.value)}>
                 {visibleCharacters.map((character) => <option key={character.id} value={character.id}>{character.name}</option>)}
               </select>
             </label>

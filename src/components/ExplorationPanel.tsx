@@ -8,6 +8,7 @@ import NumberInput from '@/components/NumberInput';
 import { DEFAULT_LOOT_ENTRIES, LOOT_BIOMES, LOOT_ROOM_TYPES } from '@/lib/lootPresets';
 import { rarityClass } from '@/lib/rarity';
 import { createDebouncedRefresh } from '@/lib/realtime';
+import { readRememberedSelection, rememberSelection } from '@/lib/selectionMemory';
 import type { Character, InventoryItemType, LootEntry, LootGeneratorConfig, LootPoolSize, LootRareRule, LootRollResult, LootRoomRule, Profile } from '@/lib/types';
 
 type ExplorationLootResult = LootRollResult & {
@@ -446,7 +447,8 @@ export default function ExplorationPanel({ profile }: { profile: Profile }) {
       roll_id: `${stamp}-${index}-${result.loot_entry_id}`,
       remaining: result.quantity
     }));
-    const firstCharacterId = characters[0]?.id ?? '';
+    const rememberedRecipient = readRememberedSelection(profile.id, 'loot-recipient-character');
+    const firstCharacterId = characters.some((entry) => entry.id === rememberedRecipient) ? rememberedRecipient : characters[0]?.id ?? '';
     setResults(rolled);
     setRecipientByLoot(Object.fromEntries(rolled.map((result) => [result.roll_id, firstCharacterId])));
     setQuantityByLoot(Object.fromEntries(rolled.map((result) => [result.roll_id, 1])));
@@ -484,6 +486,11 @@ export default function ExplorationPanel({ profile }: { profile: Profile }) {
     ].slice(0, 8));
     setQuantityByLoot((current) => ({ ...current, [result.roll_id]: Math.min(current[result.roll_id] ?? 1, Math.max(1, remaining)) }));
     setMessage(`${amount}× ${result.item_name} given to ${character.name}.${remaining > 0 ? ` ${remaining} still in the party cache.` : ' That stack is fully distributed.'}`);
+  }
+
+  function chooseLootRecipient(rollId: string, characterId: string) {
+    setRecipientByLoot((current) => ({ ...current, [rollId]: characterId }));
+    rememberSelection(profile.id, 'loot-recipient-character', characterId);
   }
 
   const remainingItems = results.reduce((total, result) => total + result.remaining, 0);
@@ -634,7 +641,7 @@ export default function ExplorationPanel({ profile }: { profile: Profile }) {
                       <select
                         className="field"
                         value={recipientByLoot[result.roll_id] ?? ''}
-                        onChange={(event) => setRecipientByLoot((current) => ({ ...current, [result.roll_id]: event.target.value }))}
+                        onChange={(event) => chooseLootRecipient(result.roll_id, event.target.value)}
                         disabled={complete || characters.length === 0}
                       >
                         {characters.length === 0 && <option value="">No player characters</option>}
