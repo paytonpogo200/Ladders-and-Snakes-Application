@@ -30,7 +30,7 @@ const legacyItemTypes: { value: InventoryItemType; label: string; icon: LucideIc
 
 type AttributeModifierMap = Partial<Record<keyof CharacterAttributes, number>>;
 type ModifierFormState = Record<keyof CharacterAttributes, string>;
-type InventoryItemWithLock = InventoryItem & { is_trade_locked?: boolean | null; modifiers?: AttributeModifierMap | null };
+type InventoryItemWithLock = InventoryItem & { is_trade_locked?: boolean | null; modifiers?: AttributeModifierMap | null; legendary_display_text?: string | null };
 
 function emptyModifierForm(): ModifierFormState {
   return Object.fromEntries(ATTRIBUTE_KEYS.map((key) => [key, ''])) as ModifierFormState;
@@ -69,6 +69,10 @@ function imbuedSpellName(notes?: string | null) {
 
 function legendaryDescription(notes?: string | null) {
   return notes?.match(/Legendary Weapon:\s*([^\n]+)/i)?.[1]?.trim() ?? '';
+}
+
+function legendaryDisplayText(item?: InventoryItemWithLock | null) {
+  return (item?.legendary_display_text ?? '').trim();
 }
 
 function imbueNotes(spellName: string) {
@@ -124,6 +128,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     storage_capacity: 0,
     legendary_weapon: false,
     legendary_description: '',
+    legendary_display_text: '',
     modifiers_enabled: false,
     modifiers: emptyModifierForm()
   });
@@ -337,6 +342,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
       storage_capacity: item.storage_capacity ?? 0,
       legendary_weapon: item.rarity === 'Legendary' && itemTypeValue(item) === 'weapon',
       legendary_description: legendaryDescription(item.notes),
+      legendary_display_text: legendaryDisplayText(item),
       modifiers_enabled: hasModifierValues(item.modifiers),
       modifiers: modifierFormFromItem(item.modifiers)
     });
@@ -348,7 +354,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     setEmptyTarget({ slot, parentId });
     setAction('inspect');
     setMessage('');
-    setForm({ item_name: '', quantity: 1, item_type: 'misc', imbued_spell_id: '', equipped: false, storage_capacity: 0, legendary_weapon: false, legendary_description: '', modifiers_enabled: false, modifiers: emptyModifierForm() });
+    setForm({ item_name: '', quantity: 1, item_type: 'misc', imbued_spell_id: '', equipped: false, storage_capacity: 0, legendary_weapon: false, legendary_description: '', legendary_display_text: '', modifiers_enabled: false, modifiers: emptyModifierForm() });
   }
 
   function closeEditor() {
@@ -374,6 +380,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
           : imbueNotes(spellName)
         : '',
       rarity: isLegendaryWeapon ? 'Legendary' : (selectedItem?.rarity ?? 'Common'),
+      legendary_display_text: isLegendaryWeapon ? form.legendary_display_text.trim() : '',
       equipped: form.equipped,
       modifiers: form.modifiers_enabled ? cleanModifierInput(form.modifiers) : {}
     };
@@ -433,6 +440,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
   function renderSlot(item: InventoryItemWithLock | undefined, slot: number, parentId: string | null) {
     const key = slotKey(slot, parentId);
     const spellName = item ? imbuedSpellName(item.notes) : '';
+    const enchantedClass = item && spellName ? 'inventory-enchanted-outline' : '';
     return (
       <button
         key={key}
@@ -455,16 +463,15 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
           if (suppressClick.current) return;
           item ? openItem(item) : openEmpty(slot, parentId);
         }}
-        className={`inventory-slot relative flex aspect-square min-h-20 flex-col items-center justify-center rounded-xl border p-1.5 text-center transition active:scale-95 sm:min-h-16 sm:p-2 ${
+        className={`inventory-slot relative flex aspect-square min-h-24 flex-col items-center justify-center rounded-xl border p-2 text-center transition active:scale-95 sm:min-h-16 sm:p-2 ${
           item ? rarityClass(item.rarity) : 'border-dashed border-[var(--line)] bg-black/10'
-        } ${!item && !canEdit ? 'cursor-default' : ''} ${draggingItemId === item?.id ? 'inventory-slot-dragging' : ''} ${dragTargetKey === key ? 'inventory-slot-target' : ''}`}
+        } ${enchantedClass} ${!item && !canEdit ? 'cursor-default' : ''} ${draggingItemId === item?.id ? 'inventory-slot-dragging' : ''} ${dragTargetKey === key ? 'inventory-slot-target' : ''}`}
       >
         <span className="pointer-events-none absolute left-2 top-1.5 text-[9px] font-black text-[var(--muted)]">{slot + 1}</span>
         {item ? (
           <>
             <span className="mb-1 text-[var(--brass)]"><ItemIcon type={item.item_type} /></span>
             <span className="inventory-item-name line-clamp-2 text-xs font-black leading-4">{item.item_name}</span>
-            {spellName && <span className="inventory-imbued-spell">{spellName}</span>}
             {item.quantity > 1 && <span className="mt-1 rounded-full bg-black/40 px-1.5 text-[10px] font-black">×{item.quantity}</span>}
             {item.equipped && <Check className="absolute right-1.5 top-1.5 text-[var(--teal)]" size={13} />}
             {item.is_trade_locked && <span className="absolute bottom-1 right-1 rounded-full border border-[#d1a85b66] bg-black/40 px-1 text-[8px] font-black text-[var(--brass)]">UNIQUE</span>}
@@ -486,7 +493,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
+      <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
         {Array.from({ length: slotCount }, (_, index) => renderSlot(mainItems.find((entry) => entry.slot_index === index), index, null))}
       </div>
 
@@ -565,7 +572,10 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
                       <span className="text-xs font-black uppercase tracking-wider text-[var(--brass)]">Legendary weapon</span>
                       <span className="text-xs leading-5 text-[var(--muted)]">Gives the item the smoother Legendary gold/brass effect and stores its unique ability.</span>
                       {form.legendary_weapon && (
-                        <textarea className="field min-h-20" value={form.legendary_description} onChange={(event) => setForm({ ...form, legendary_description: event.target.value })} placeholder="What does this legendary weapon do?" />
+                        <>
+                          <textarea className="field min-h-20" value={form.legendary_description} onChange={(event) => setForm({ ...form, legendary_description: event.target.value })} placeholder="What does this legendary weapon do?" />
+                          <input className="field" value={form.legendary_display_text} onChange={(event) => setForm({ ...form, legendary_display_text: event.target.value })} placeholder="Brief active loadout display text, ex: Reroll once per combat" />
+                        </>
                       )}
                     </span>
                   </label>
@@ -608,7 +618,8 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
               <div className="rounded-xl border border-[var(--line)] bg-black/15 p-3 text-sm leading-6 text-[var(--muted)]">
                 <p className="font-black text-[var(--paper)]">{selectedItem.item_type}</p>
                 {itemTypeValue(selectedItem) === 'weapon' && imbuedSpellName(selectedItem.notes) && <p>Imbued: {imbuedSpellName(selectedItem.notes)}</p>}
-                {itemTypeValue(selectedItem) === 'weapon' && legendaryDescription(selectedItem.notes) && <p>Legendary: {legendaryDescription(selectedItem.notes)}</p>}
+                {itemTypeValue(selectedItem) === 'weapon' && legendaryDescription(selectedItem.notes) && <p>Legendary ability: {legendaryDescription(selectedItem.notes)}</p>}
+                {itemTypeValue(selectedItem) === 'weapon' && legendaryDisplayText(selectedItem) && <p>Active display: {legendaryDisplayText(selectedItem)}</p>}
                 <p>Quantity: {selectedItem.quantity}{selectedItem.is_storage ? ` · ${selectedItem.storage_capacity} storage slots` : ''}</p>
                 {selectedItem.is_trade_locked && <p className="text-[var(--brass)]">Unique item · cannot be traded.</p>}
               </div>

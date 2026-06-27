@@ -48,7 +48,7 @@ const grantItemTypes: { value: InventoryItemType; label: string }[] = [
 type LoadoutSlotKey = 'weapon' | 'armor' | 'shield' | 'pet';
 type AttributeModifierMap = Partial<Record<keyof CharacterAttributes, number>>;
 type ModifierFormState = Record<keyof CharacterAttributes, string>;
-type InventoryItemWithModifiers = InventoryItem & { modifiers?: AttributeModifierMap | null };
+type InventoryItemWithModifiers = InventoryItem & { modifiers?: AttributeModifierMap | null; legendary_display_text?: string | null };
 
 function emptyModifierForm(): ModifierFormState {
   return Object.fromEntries(ATTRIBUTE_KEYS.map((key) => [key, ''])) as ModifierFormState;
@@ -103,6 +103,10 @@ function imbuedSpellName(notes?: string | null) {
 
 function legendaryDescription(notes?: string | null) {
   return notes?.match(/Legendary Weapon:\s*([^\n]+)/i)?.[1]?.trim() ?? '';
+}
+
+function legendaryDisplayText(item?: InventoryItemWithModifiers | null) {
+  return (item?.legendary_display_text ?? '').trim();
 }
 
 function modifierFormFromItem(modifiers?: AttributeModifierMap | null): ModifierFormState {
@@ -171,6 +175,7 @@ export default function CharacterSheet({
     storage_capacity: 0,
     legendary_weapon: false,
     legendary_description: '',
+    legendary_display_text: '',
     modifiers_enabled: false,
     modifiers: emptyModifierForm()
   });
@@ -191,6 +196,7 @@ export default function CharacterSheet({
     storage_capacity: 0,
     legendary_weapon: false,
     legendary_description: '',
+    legendary_display_text: '',
     modifiers_enabled: false,
     modifiers: emptyModifierForm()
   });
@@ -209,6 +215,7 @@ export default function CharacterSheet({
       storage_capacity: 0,
       legendary_weapon: false,
       legendary_description: '',
+      legendary_display_text: '',
       modifiers_enabled: false,
       modifiers: emptyModifierForm()
     });
@@ -305,7 +312,8 @@ export default function CharacterSheet({
           storage_capacity_input: Math.max(0, Number(grantForm.storage_capacity) || 0),
           rarity_input: isLegendaryWeapon ? 'Legendary' : 'Common',
           trade_locked_input: false,
-          modifiers_input: itemModifiers
+          modifiers_input: itemModifiers,
+          legendary_display_text_input: isLegendaryWeapon ? grantForm.legendary_display_text.trim() : ''
         });
 
     setToolMessage(result.error ? result.error.message : 'Item added to the character.');
@@ -419,6 +427,7 @@ export default function CharacterSheet({
       storage_capacity: item.storage_capacity ?? 0,
       legendary_weapon: item.rarity === 'Legendary' && typeOfItem(item) === 'weapon',
       legendary_description: legendaryDescription(item.notes),
+      legendary_display_text: legendaryDisplayText(item),
       modifiers_enabled: hasModifierValues(item.modifiers),
       modifiers: modifierFormFromItem(item.modifiers)
     });
@@ -446,6 +455,7 @@ export default function CharacterSheet({
           : imbueNotes(spellName)
         : '',
       rarity: isLegendaryWeapon ? 'Legendary' : (selectedLoadoutItem.rarity ?? 'Common'),
+      legendary_display_text: isLegendaryWeapon ? loadoutForm.legendary_display_text.trim() : '',
       equipped: true,
       modifiers: loadoutForm.modifiers_enabled ? cleanModifierInput(loadoutForm.modifiers) : {}
     };
@@ -611,6 +621,8 @@ export default function CharacterSheet({
     const hasValue = hasItem || Boolean(fallbackName);
     const displayName = item?.item_name ?? fallbackName ?? 'Empty';
     const lines = modifierLines(item);
+    const spellName = item ? imbuedSpellName(item.notes) : '';
+    const abilityDisplay = item && item.rarity === 'Legendary' ? legendaryDisplayText(item) : '';
     const filledClass = item ? `loadout-filled rarity-card ${rarityClass(item.rarity)}` : '';
     return (
       <div
@@ -646,6 +658,8 @@ export default function CharacterSheet({
           <span className="text-[10px] font-black uppercase tracking-wider">{label}</span>
         </div>
         <p className="text-sm font-black leading-5">{displayName}</p>
+        {spellName && <p className="loadout-imbued-spell">{spellName}</p>}
+        {abilityDisplay && <p className="loadout-legendary-display">{abilityDisplay}</p>}
         {hasValue ? (
           lines.length > 0 ? (
             <div className="loadout-modifier-lines">
@@ -806,7 +820,10 @@ export default function CharacterSheet({
                     <span className="text-xs font-black uppercase tracking-wider text-[var(--brass)]">Legendary weapon</span>
                     <span className="text-xs leading-5 text-[var(--muted)]">Turns this weapon into a Legendary item and unlocks its ability description.</span>
                     {grantForm.legendary_weapon && (
-                      <textarea className="field min-h-20" value={grantForm.legendary_description} onChange={(event) => setGrantForm({ ...grantForm, legendary_description: event.target.value })} placeholder="What does this legendary weapon do?" />
+                      <>
+                        <textarea className="field min-h-20" value={grantForm.legendary_description} onChange={(event) => setGrantForm({ ...grantForm, legendary_description: event.target.value })} placeholder="What does this legendary weapon do?" />
+                        <input className="field" value={grantForm.legendary_display_text} onChange={(event) => setGrantForm({ ...grantForm, legendary_display_text: event.target.value })} placeholder="Brief active loadout display text, ex: Reroll once per combat" />
+                      </>
                     )}
                   </span>
                 </label>
@@ -961,6 +978,8 @@ export default function CharacterSheet({
                 <p className="eyebrow mb-2">Active loadout item</p>
                 <h3 className="text-2xl font-black">{selectedLoadoutItem.item_name}</h3>
                 <p className="mt-1 text-xs text-[var(--muted)]">Equipped in the active loadout. Click save after edits, or unequip it to return it to carried inventory only.</p>
+                {legendaryDescription(selectedLoadoutItem.notes) && <p className="mt-2 text-xs leading-5 text-[var(--brass)]">Legendary ability: {legendaryDescription(selectedLoadoutItem.notes)}</p>}
+                {legendaryDisplayText(selectedLoadoutItem) && <p className="mt-1 text-xs leading-5 text-[var(--muted)]">Active display: {legendaryDisplayText(selectedLoadoutItem)}</p>}
               </div>
               <button type="button" onClick={closeLoadoutEditor} className="rounded-full border border-[var(--line)] p-2 text-[var(--muted)]" aria-label="Close"><X size={17} /></button>
             </div>
@@ -998,7 +1017,10 @@ export default function CharacterSheet({
                     <span className="text-xs font-black uppercase tracking-wider text-[var(--brass)]">Legendary weapon</span>
                     <span className="text-xs leading-5 text-[var(--muted)]">Keeps the Legendary effect in inventory and active loadout.</span>
                     {loadoutForm.legendary_weapon && (
-                      <textarea className="field min-h-20" value={loadoutForm.legendary_description} onChange={(event) => setLoadoutForm({ ...loadoutForm, legendary_description: event.target.value })} placeholder="What does this legendary weapon do?" readOnly={!canEdit} />
+                      <>
+                        <textarea className="field min-h-20" value={loadoutForm.legendary_description} onChange={(event) => setLoadoutForm({ ...loadoutForm, legendary_description: event.target.value })} placeholder="What does this legendary weapon do?" readOnly={!canEdit} />
+                        <input className="field" value={loadoutForm.legendary_display_text} onChange={(event) => setLoadoutForm({ ...loadoutForm, legendary_display_text: event.target.value })} placeholder="Brief active loadout display text, ex: Reroll once per combat" readOnly={!canEdit} />
+                      </>
                     )}
                   </span>
                 </label>
