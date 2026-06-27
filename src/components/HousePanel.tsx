@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Home, LogIn, LogOut, PackageOpen, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import NumberInput from '@/components/NumberInput';
@@ -28,6 +28,10 @@ export default function HousePanel({
   const [quantity, setQuantity] = useState(1);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [draggingHouseItemId, setDraggingHouseItemId] = useState<string | null>(null);
+  const [dragTargetSlot, setDragTargetSlot] = useState<number | null>(null);
+  const dragItem = useRef<HouseInventoryItem | null>(null);
+  const suppressClick = useRef(false);
 
   async function loadHouse() {
     if (!ownerUserId) return;
@@ -136,6 +140,45 @@ export default function HousePanel({
     }
   }
 
+  async function moveHouseItem(item: HouseInventoryItem, slot: number) {
+    setMessage('');
+    const { error } = await supabase.rpc('move_house_item_slot', {
+      target_house_item_id: item.id,
+      target_slot_index: slot
+    });
+    if (error) setMessage(error.message);
+    await loadHouse();
+  }
+
+  function beginHouseDrag(item: HouseInventoryItem, event: React.PointerEvent<HTMLButtonElement>) {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragItem.current = item;
+    setDraggingHouseItemId(item.id);
+    document.body.classList.add('inventory-drag-active');
+  }
+
+  function moveHouseDrag(event: React.PointerEvent<HTMLButtonElement>) {
+    if (!dragItem.current) return;
+    event.preventDefault();
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-house-slot]');
+    const slot = target ? Number(target.dataset.houseSlot) : NaN;
+    setDragTargetSlot(Number.isFinite(slot) ? slot : null);
+  }
+
+  function endHouseDrag() {
+    const item = dragItem.current;
+    const slot = dragTargetSlot;
+    if (item) {
+      suppressClick.current = true;
+      window.setTimeout(() => { suppressClick.current = false; }, 80);
+      if (slot !== null && slot !== item.slot_index) void moveHouseItem(item, slot);
+    }
+    dragItem.current = null;
+    setDraggingHouseItemId(null);
+    setDragTargetSlot(null);
+    document.body.classList.remove('inventory-drag-active');
+  }
+
   if (!house) return null;
 
   return (
@@ -152,8 +195,17 @@ export default function HousePanel({
             return (
               <button
                 key={slot}
-                onClick={() => item && setSelectedHouseItemId(item.id)}
-                className={`relative flex aspect-square min-h-12 flex-col items-center justify-center rounded-lg border p-1.5 text-center ${item ? rarityClass(item.rarity) : 'border-dashed border-[var(--line)] bg-black/10'}`}
+                data-house-slot={slot}
+                data-house-item={item ? 'true' : 'false'}
+                onPointerDown={(event) => item && beginHouseDrag(item, event)}
+                onPointerMove={moveHouseDrag}
+                onPointerUp={endHouseDrag}
+                onPointerCancel={endHouseDrag}
+                onClick={() => {
+                  if (suppressClick.current) return;
+                  item && setSelectedHouseItemId(item.id);
+                }}
+                className={`house-slot relative flex aspect-square min-h-12 flex-col items-center justify-center rounded-lg border p-1.5 text-center ${item ? rarityClass(item.rarity) : 'border-dashed border-[var(--line)] bg-black/10'} ${draggingHouseItemId === item?.id ? 'inventory-slot-dragging' : ''} ${dragTargetSlot === slot ? 'inventory-slot-target' : ''}`}
                 aria-label={item ? `${item.item_name}, quantity ${item.quantity}` : `Empty house slot ${slot + 1}`}
               >
                 <span className="absolute right-1 top-0.5 text-[7px] text-[var(--muted)]">{slot + 1}</span>

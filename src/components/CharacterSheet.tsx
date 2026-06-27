@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Coins, Gift, Heart, PackageOpen, Plus, Save, Sparkles, UserRound, WandSparkles } from 'lucide-react';
+import { Coins, Gift, Heart, PackageOpen, PawPrint, Plus, Save, Shield, Sparkles, Sword, UserRound, WandSparkles, type LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import InventoryPanel from '@/components/InventoryPanel';
 import SpellPanel from '@/components/SpellPanel';
@@ -21,6 +21,8 @@ import {
   type CurrencyDenomination,
   type CurrencySystem,
   type InventoryItemType,
+  type InventoryItem,
+  type CharacterProperty,
   type MarketProduct,
   type Profile,
   type Spell
@@ -78,6 +80,8 @@ export default function CharacterSheet({
   const [wallets, setWallets] = useState<CharacterWallet[]>([]);
   const [products, setProducts] = useState<MarketProduct[]>([]);
   const [spells, setSpells] = useState<Spell[]>([]);
+  const [equipmentItems, setEquipmentItems] = useState<InventoryItem[]>([]);
+  const [properties, setProperties] = useState<CharacterProperty[]>([]);
   const [currencyForm, setCurrencyForm] = useState({ denomination_id: '', amount: 1 });
   const [grantMode, setGrantMode] = useState<'catalog' | 'custom'>('catalog');
   const [grantProductId, setGrantProductId] = useState('');
@@ -109,6 +113,29 @@ export default function CharacterSheet({
       setSpells((spellResult.data ?? []) as Spell[]);
     });
   }, [character.class_key]);
+
+  async function loadLoadoutStrip() {
+    const supabase = createClient();
+    const [itemResult, propertyResult] = await Promise.all([
+      supabase.from('inventory_items').select('*').eq('character_id', character.id).eq('equipped', true).order('updated_at', { ascending: false }),
+      supabase.from('character_properties').select('*').eq('character_id', character.id).order('created_at')
+    ]);
+    if (!itemResult.error) setEquipmentItems((itemResult.data ?? []) as InventoryItem[]);
+    if (!propertyResult.error) setProperties((propertyResult.data ?? []) as CharacterProperty[]);
+  }
+
+  useEffect(() => {
+    loadLoadoutStrip();
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`character-loadout-${character.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_items', filter: `character_id=eq.${character.id}` }, loadLoadoutStrip)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'character_properties', filter: `character_id=eq.${character.id}` }, loadLoadoutStrip)
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [character.id]);
 
   async function reloadWallets() {
     const { data } = await createClient().from('character_wallets').select('*').eq('character_id', character.id);
@@ -178,6 +205,22 @@ export default function CharacterSheet({
   const shownAttributes = editing ? form.attributes : attributes;
   const personalPassives = (editing ? form.personal_passives : character.notes ?? '').trim();
   const personalPassiveLines = personalPassives.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const equippedWeapon = equipmentItems.find((item) => item.item_type === 'weapon') ?? null;
+  const equippedArmor = equipmentItems.find((item) => item.item_type === 'armor' && !/shield/i.test(item.item_name)) ?? null;
+  const equippedShield = equipmentItems.find((item) => /shield/i.test(item.item_name)) ?? null;
+  const activePet = properties.find((entry) => entry.property_type === 'animal') ?? null;
+
+  function LoadoutSlot({ label, value, icon: Icon }: { label: string; value: string; icon: LucideIcon }) {
+    return (
+      <div className="surface-soft min-h-20 rounded-xl border border-[#e0a64e22] p-3">
+        <div className="mb-2 flex items-center gap-2 text-[var(--brass)]">
+          <Icon size={16} />
+          <span className="text-[10px] font-black uppercase tracking-wider">{label}</span>
+        </div>
+        <p className={`text-sm font-black leading-5 ${value === 'Empty' ? 'text-[var(--muted)]' : 'text-[var(--paper)]'}`}>{value}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-4 space-y-4 border-t border-white/[0.07] pt-4">
@@ -425,6 +468,17 @@ export default function CharacterSheet({
       </section>
 
       <SpellPanel character={character} canEdit={canEdit} readOnly={readOnly} onCharacterChanged={onSaved} />
+      <section>
+        <div className="rule-title mb-3">
+          <h4 className="text-sm font-black uppercase tracking-wider">Loadout</h4>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <LoadoutSlot label="Armor" icon={Shield} value={equippedArmor?.item_name ?? 'Empty'} />
+          <LoadoutSlot label="Weapon" icon={Sword} value={equippedWeapon?.item_name ?? 'Empty'} />
+          <LoadoutSlot label="Shield" icon={Shield} value={equippedShield?.item_name ?? 'Empty'} />
+          <LoadoutSlot label="Active pet" icon={PawPrint} value={activePet?.custom_name || activePet?.property_name || 'Empty'} />
+        </div>
+      </section>
       <InventoryPanel character={character} canEdit={canEdit} profile={profile} />
       {character.class_key === 'beastmaster' && <TamedBeastsPanel character={character} profile={profile} readOnly={readOnly} />}
       <PropertyPanel character={character} profile={profile} readOnly={readOnly} />
