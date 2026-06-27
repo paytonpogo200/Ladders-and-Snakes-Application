@@ -32,7 +32,7 @@ body {
   margin: 0;
   background:
     linear-gradient(rgba(23, 10, 3, 0.54), rgba(23, 10, 3, 0.7)),
-    url('/images/calostrynn-map.png') center / cover no-repeat scroll;
+    url('/images/calostrynn-map.png') center / cover no-repeat fixed;
 }
 
 button,
@@ -64,7 +64,7 @@ textarea {
 
 .app-shell::before {
   content: '';
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
@@ -109,6 +109,7 @@ h3,
     linear-gradient(145deg, rgba(56, 31, 15, 0.95), rgba(29, 15, 7, 0.96)),
     rgba(32, 17, 8, 0.95);
   box-shadow: 0 20px 55px rgba(20, 7, 1, 0.34), inset 0 1px rgba(255, 236, 199, 0.06);
+  backdrop-filter: blur(6px) saturate(0.9);
 }
 
 .surface-soft {
@@ -217,7 +218,8 @@ h3,
   overflow-y: auto;
 }
 
-.rarity-card {
+.rarity-card,
+.inventory-slot {
   position: relative;
   isolation: isolate;
   overflow: hidden;
@@ -229,7 +231,27 @@ h3,
 .rarity-uncommon { border-color: #76d0a5; background: linear-gradient(145deg, rgba(42, 133, 88, .34), rgba(20, 43, 28, .92)); }
 .rarity-rare { border-color: #70baff; background: linear-gradient(145deg, rgba(38, 105, 176, .38), rgba(19, 33, 63, .94)); }
 .rarity-epic { border-color: #c68cff; background: linear-gradient(145deg, rgba(126, 67, 174, .42), rgba(45, 20, 66, .94)); }
-.rarity-legendary { border-color: #ffd166; background: linear-gradient(145deg, rgba(190, 127, 20, .44), rgba(64, 38, 8, .95)); }
+
+.rarity-legendary {
+  border-color: transparent;
+  background:
+    linear-gradient(140deg, rgba(74, 41, 8, .95), rgba(151, 92, 22, .58), rgba(67, 36, 7, .96), rgba(197, 133, 42, .5), rgba(74, 41, 8, .95)) padding-box,
+    linear-gradient(115deg, #8d5616, #d99b3a, #ffd166, #a9691d, #f2b24b, #8d5616) border-box;
+  background-size: 360% 360%, 420% 420%;
+  animation: legendary-shift 18s ease-in-out infinite;
+  box-shadow: 0 0 16px rgba(224, 166, 78, .18), inset 0 0 24px rgba(255, 209, 102, .1);
+}
+
+.rarity-legendary::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  opacity: .22;
+  background: linear-gradient(120deg, #8f5615, #e0a64e, #ffe09a, #9b641c, #d18b2c, #8f5615);
+  background-size: 380% 380%;
+  animation: legendary-shift 18s ease-in-out infinite reverse;
+}
 
 .rarity-mythical {
   border-color: transparent;
@@ -256,6 +278,41 @@ h3,
   0% { background-position: 0% 50%, 0% 50%; }
   50% { background-position: 100% 50%, 150% 50%; }
   100% { background-position: 0% 50%, 300% 50%; }
+}
+
+@keyframes legendary-shift {
+  0% { background-position: 0% 50%, 0% 50%; }
+  50% { background-position: 100% 50%, 120% 50%; }
+  100% { background-position: 0% 50%, 240% 50%; }
+}
+
+.loadout-drop-slot {
+  position: relative;
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease, background .18s ease;
+}
+
+.loadout-drop-slot-active {
+  border-color: var(--brass) !important;
+  box-shadow: 0 0 0 3px rgba(224, 166, 78, .18), 0 0 30px rgba(224, 166, 78, .26), inset 0 0 28px rgba(224, 166, 78, .08);
+  transform: translateY(-1px);
+}
+
+.sheet-section-break {
+  height: 1px;
+  margin: 1.35rem 0 1rem;
+  background: linear-gradient(90deg, transparent, rgba(224, 166, 78, .18), rgba(224, 166, 78, .62), rgba(224, 166, 78, .18), transparent);
+  box-shadow: 0 0 18px rgba(224, 166, 78, .16);
+}
+
+.inventory-imbued-spell {
+  display: block;
+  margin-top: .18rem;
+  font-size: .64rem;
+  line-height: .95rem;
+  font-weight: 900;
+  letter-spacing: .04em;
+  color: var(--blue);
+  text-transform: uppercase;
 }
 
 .parchment-table {
@@ -298,14 +355,6 @@ h3,
   transform: scale(0.96);
 }
 
-.inventory-slot[data-inventory-item="true"] {
-  touch-action: none;
-}
-
-.house-slot[data-house-item="true"] {
-  touch-action: none;
-}
-
 .inventory-slot-target {
   border-color: var(--brass) !important;
   box-shadow: 0 0 0 3px rgba(224, 166, 78, 0.2), 0 0 22px rgba(224, 166, 78, 0.28);
@@ -314,54 +363,12 @@ h3,
 body.inventory-drag-active {
   user-select: none;
   overscroll-behavior: contain;
-  touch-action: none;
-}
-
-body.inventory-drag-active * {
-  touch-action: none !important;
-}
-
-.inventory-drag-ghost {
-  position: fixed;
-  z-index: 9999;
-  pointer-events: none;
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  width: min(13rem, 72vw);
-  min-height: 3.25rem;
-  padding: 0.55rem 0.7rem;
-  border-radius: 0.95rem;
-  transform: translate(-50%, -58%);
-  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.45), 0 0 0 2px rgba(224, 166, 78, 0.42);
-  backdrop-filter: blur(8px);
-}
-
-.inventory-drag-ghost-icon {
-  display: inline-flex;
-  flex-shrink: 0;
-  color: var(--brass);
-}
-
-.inventory-item-name {
-  display: -webkit-box;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-
-.inventory-slot-icon svg {
-  height: 15px;
-  width: 15px;
 }
 
 .personal-scroll-editor {
   color: var(--paper);
-  font-family: 'Segoe Print', 'Bradley Hand ITC', 'Lucida Handwriting', Cambria, Georgia, serif;
+  font-family: Cambria, Georgia, 'Times New Roman', serif;
   font-size: 1.05rem;
-  font-weight: 560;
   letter-spacing: 0.01em;
   box-shadow: inset 0 1px rgba(255, 236, 199, 0.05), inset 0 0 38px rgba(0, 0, 0, 0.28);
 }
@@ -370,20 +377,9 @@ body.inventory-drag-active * {
 .personal-scroll-editor h1,
 .personal-scroll-editor h2,
 .personal-scroll-editor h3 {
-  font-family: 'Blackadder ITC', 'Lucida Calligraphy', 'Old English Text MT', 'UnifrakturMaguntia', Georgia, serif;
+  font-family: 'Old English Text MT', 'Blackadder ITC', 'UnifrakturMaguntia', Georgia, serif;
   color: #f6dfaa;
   text-shadow: 0 2px 0 rgba(41, 19, 6, 0.9), 0 0 18px rgba(224, 166, 78, 0.22);
-}
-
-@media (min-width: 640px) {
-  .inventory-item-name {
-    -webkit-line-clamp: 2;
-  }
-
-  .inventory-slot-icon svg {
-    height: 19px;
-    width: 19px;
-  }
 }
 
 .personal-scroll-editor:focus {
