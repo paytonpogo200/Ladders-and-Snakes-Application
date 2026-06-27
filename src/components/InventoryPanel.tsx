@@ -299,6 +299,28 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     await loadItems();
   }
 
+  async function unequipItem(itemId: string) {
+    const { error } = await supabase.rpc('unequip_inventory_item', { target_item_id: itemId });
+    if (error) setMessage(error.message);
+    await loadItems();
+  }
+
+  async function dropNativeDraggedItem(event: DragEvent<HTMLButtonElement>, slot: number, parentId: string | null) {
+    const itemId = event.dataTransfer.getData('application/x-inventory-item-id') || event.dataTransfer.getData('text/plain');
+    if (!itemId) return;
+    const dragged = items.find((entry) => entry.id === itemId);
+    if (!dragged || dragged.is_storage) return;
+
+    event.preventDefault();
+    const fromLoadout = event.dataTransfer.getData('application/x-loadout-source') === 'true';
+    if (dragged.slot_index !== slot || dragged.parent_item_id !== parentId) {
+      await moveItem(dragged, slot, parentId);
+    }
+    if (fromLoadout) {
+      await unequipItem(itemId);
+    }
+  }
+
   function openItem(item: InventoryItemWithLock) {
     const matchedSpell = spells.find((spell) => spell.name === imbuedSpellName(item.notes));
     setSelectedItemId(item.id);
@@ -421,6 +443,13 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
         draggable={!!item && mayManage && !item.is_storage}
         onDragStart={(event) => item && beginNativeDrag(item, event)}
         onDragEnd={() => setDraggingItemId(null)}
+        onDragOver={(event) => {
+          if (Array.from(event.dataTransfer.types).includes('application/x-inventory-item-id')) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+          }
+        }}
+        onDrop={(event) => dropNativeDraggedItem(event, slot, parentId)}
         onPointerDown={(event) => item && beginLongPress(item, event)}
         onClick={() => {
           if (suppressClick.current) return;

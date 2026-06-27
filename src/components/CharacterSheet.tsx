@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState, type DragEvent } from 'react';
-import { Coins, Gift, Heart, PackageOpen, PawPrint, Plus, Save, Shield, Sparkles, Sword, UserRound, WandSparkles, type LucideIcon } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type PointerEvent } from 'react';
+import { Coins, Gift, Heart, PackageOpen, PawPrint, Plus, Save, Shield, Sparkles, Sword, Trash2, UserRound, WandSparkles, X, type LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import InventoryPanel from '@/components/InventoryPanel';
 import SpellPanel from '@/components/SpellPanel';
 import NumberInput from '@/components/NumberInput';
+import Modal from '@/components/Modal';
 import TamedBeastsPanel from '@/components/TamedBeastsPanel';
 import PropertyPanel from '@/components/PropertyPanel';
 import { classAssetToPreset, getClassPreset, type ClassPreset } from '@/lib/classPresets';
@@ -96,6 +97,27 @@ function legendaryNotes(description: string, spellName: string) {
   return chunks.join('\n');
 }
 
+function imbuedSpellName(notes?: string | null) {
+  return notes?.match(/Imbued spell:\s*([^\n]+)/i)?.[1]?.trim() ?? '';
+}
+
+function legendaryDescription(notes?: string | null) {
+  return notes?.match(/Legendary Weapon:\s*([^\n]+)/i)?.[1]?.trim() ?? '';
+}
+
+function modifierFormFromItem(modifiers?: AttributeModifierMap | null): ModifierFormState {
+  const form = emptyModifierForm();
+  ATTRIBUTE_KEYS.forEach((key) => {
+    const value = modifierNumber(modifiers?.[key]);
+    if (value !== 0) form[key] = String(value);
+  });
+  return form;
+}
+
+function hasModifierValues(modifiers?: AttributeModifierMap | null) {
+  return ATTRIBUTE_KEYS.some((key) => modifierNumber(modifiers?.[key]) !== 0);
+}
+
 function typeOfItem(item?: InventoryItem | null) {
   return String(item?.item_type ?? '');
 }
@@ -154,6 +176,29 @@ export default function CharacterSheet({
   });
   const [toolMessage, setToolMessage] = useState('');
   const [hoveredLoadoutSlot, setHoveredLoadoutSlot] = useState<LoadoutSlotKey | null>(null);
+  const [selectedLoadoutItem, setSelectedLoadoutItem] = useState<InventoryItemWithModifiers | null>(null);
+  const [loadoutAction, setLoadoutAction] = useState<'inspect' | 'drop'>('inspect');
+  const [loadoutQuantity, setLoadoutQuantity] = useState(1);
+  const [loadoutBusy, setLoadoutBusy] = useState(false);
+  const [loadoutDragGhost, setLoadoutDragGhost] = useState<{ item: InventoryItemWithModifiers; x: number; y: number } | null>(null);
+  const [loadoutDraggingItemId, setLoadoutDraggingItemId] = useState<string | null>(null);
+  const [loadoutForm, setLoadoutForm] = useState({
+    item_name: '',
+    quantity: 1,
+    item_type: 'misc' as InventoryItemType,
+    imbued_spell_id: '',
+    equipped: true,
+    storage_capacity: 0,
+    legendary_weapon: false,
+    legendary_description: '',
+    modifiers_enabled: false,
+    modifiers: emptyModifierForm()
+  });
+  const loadoutDragTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadoutDraggingItem = useRef<InventoryItemWithModifiers | null>(null);
+  const loadoutDragTarget = useRef<{ kind: 'loadout'; slot: LoadoutSlotKey } | { kind: 'inventory'; slot: number; parentId: string | null } | null>(null);
+  const suppressLoadoutClick = useRef(false);
+  const mayManage = profile.role === 'dm' || character.owner_user_id === profile.id;
 
   function resetGrantForm() {
     setGrantForm({
@@ -271,13 +316,7 @@ export default function CharacterSheet({
     }
   }
 
-  async function equipDroppedItem(slot: LoadoutSlotKey, event: DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    setHoveredLoadoutSlot(null);
-
-    const itemId = event.dataTransfer.getData('application/x-inventory-item-id') || event.dataTransfer.getData('text/plain');
-    if (!itemId) return;
-
+  async function equipItemToSlot(itemId: string, slot: LoadoutSlotKey) {
     const { error } = await createClient().rpc('equip_inventory_item', {
       target_item_id: itemId,
       target_slot: slot
@@ -285,13 +324,226 @@ export default function CharacterSheet({
 
     if (error) {
       setToolMessage(error.message);
-      return;
+      return false;
     }
 
     setToolMessage(`${slot === 'pet' ? 'Pet' : slot.charAt(0).toUpperCase() + slot.slice(1)} equipped.`);
     await loadLoadoutStrip();
     onSaved();
+    return true;
   }
+
+  async function equipDroppedItem(slot: LoadoutSlotKey, event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setHoveredLoadoutSlot(null);
+
+    const itemId = event.dataTransfer.getData('application/x-inventory-item-id') || event.dataTransfer.getData('text/plain');
+    if (!itemId) return;
+
+    await equipItemToSlot(itemId, slot);
+  }
+
+  async function moveLoadoutItemToInventorySlot(item: InventoryItemWithModifiers, slot: number, parentId: string | null) {
+    const supabase = createClient();
+    const moveResult = await supabase.rpc('move_inventory_item_slot', {
+      target_item_id: item.id,
+      target_parent_item_id: parentId,
+      target_slot_index: slot
+    });
+
+    if (moveResult.error) {
+      setToolMessage(moveResult.error.message);
+      return false;
+    }
+
+    const unequipResult = await supabase.rpc('unequip_inventory_item', { target_item_id: item.id });
+    if (unequipResult.error) {
+      setToolMessage(unequipResult.error.message);
+      return false;
+    }
+
+    setToolMessage(`${item.item_name} moved back to inventory.`);
+    await loadLoadoutStrip();
+    onSaved();
+    return true;
+  }
+
+  function resetLoadoutDrag() {
+    if (loadoutDragTimer.current) clearTimeout(loadoutDragTimer.current);
+    loadoutDragTimer.current = null;
+    loadoutDraggingItem.current = null;
+    loadoutDragTarget.current = null;
+    setLoadoutDraggingItemId(null);
+    setLoadoutDragGhost(null);
+    setHoveredLoadoutSlot(null);
+    document.body.classList.remove('inventory-drag-active');
+  }
+
+  function beginLoadoutLongPress(item: InventoryItemWithModifiers, event: PointerEvent<HTMLDivElement>) {
+    if (!mayManage || event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    if (loadoutDragTimer.current) clearTimeout(loadoutDragTimer.current);
+    loadoutDragTimer.current = setTimeout(() => {
+      loadoutDraggingItem.current = item;
+      setLoadoutDraggingItemId(item.id);
+      setLoadoutDragGhost({ item, x: event.clientX, y: event.clientY });
+      document.body.classList.add('inventory-drag-active');
+      if (navigator.vibrate) navigator.vibrate(18);
+    }, 380);
+  }
+
+  function beginLoadoutNativeDrag(item: InventoryItemWithModifiers, event: DragEvent<HTMLDivElement>) {
+    if (!mayManage) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.setData('application/x-inventory-item-id', item.id);
+    event.dataTransfer.setData('application/x-loadout-source', 'true');
+    event.dataTransfer.setData('text/plain', item.id);
+    event.dataTransfer.effectAllowed = 'move';
+    setLoadoutDraggingItemId(item.id);
+  }
+
+  function openLoadoutItem(item: InventoryItemWithModifiers) {
+    const matchedSpell = spells.find((spell) => spell.name === imbuedSpellName(item.notes));
+    setSelectedLoadoutItem(item);
+    setLoadoutAction('inspect');
+    setLoadoutQuantity(1);
+    setToolMessage('');
+    setLoadoutForm({
+      item_name: item.item_name,
+      quantity: item.quantity,
+      item_type: item.item_type,
+      imbued_spell_id: matchedSpell?.id ?? '',
+      equipped: item.equipped,
+      storage_capacity: item.storage_capacity ?? 0,
+      legendary_weapon: item.rarity === 'Legendary' && typeOfItem(item) === 'weapon',
+      legendary_description: legendaryDescription(item.notes),
+      modifiers_enabled: hasModifierValues(item.modifiers),
+      modifiers: modifierFormFromItem(item.modifiers)
+    });
+  }
+
+  function closeLoadoutEditor() {
+    setSelectedLoadoutItem(null);
+    setLoadoutAction('inspect');
+    setToolMessage('');
+  }
+
+  async function saveLoadoutItem(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedLoadoutItem || !canEdit || !loadoutForm.item_name.trim()) return;
+    setLoadoutBusy(true);
+    const spellName = spells.find((spell) => spell.id === loadoutForm.imbued_spell_id)?.name ?? '';
+    const isLegendaryWeapon = typeOfItem(loadoutForm as unknown as InventoryItem) === 'weapon' && loadoutForm.legendary_weapon;
+    const payload = {
+      item_name: loadoutForm.item_name.trim(),
+      quantity: Math.max(1, Number(loadoutForm.quantity) || 1),
+      item_type: loadoutForm.item_type,
+      notes: typeOfItem(loadoutForm as unknown as InventoryItem) === 'weapon'
+        ? isLegendaryWeapon
+          ? legendaryNotes(loadoutForm.legendary_description, spellName)
+          : imbueNotes(spellName)
+        : '',
+      rarity: isLegendaryWeapon ? 'Legendary' : (selectedLoadoutItem.rarity ?? 'Common'),
+      equipped: true,
+      modifiers: loadoutForm.modifiers_enabled ? cleanModifierInput(loadoutForm.modifiers) : {}
+    };
+
+    const result = await createClient()
+      .from('inventory_items')
+      .update(payload)
+      .eq('id', selectedLoadoutItem.id);
+
+    setLoadoutBusy(false);
+    if (result.error) return setToolMessage(result.error.message);
+    closeLoadoutEditor();
+    await loadLoadoutStrip();
+    onSaved();
+  }
+
+  async function unequipLoadoutItem() {
+    if (!selectedLoadoutItem) return;
+    setLoadoutBusy(true);
+    const { error } = await createClient().rpc('unequip_inventory_item', { target_item_id: selectedLoadoutItem.id });
+    setLoadoutBusy(false);
+    if (error) return setToolMessage(error.message);
+    closeLoadoutEditor();
+    await loadLoadoutStrip();
+    onSaved();
+  }
+
+  async function dropLoadoutItem() {
+    if (!selectedLoadoutItem) return;
+    setLoadoutBusy(true);
+    const { error } = await createClient().rpc('drop_inventory_item', {
+      target_item_id: selectedLoadoutItem.id,
+      drop_quantity: Math.max(1, Math.min(selectedLoadoutItem.quantity, loadoutQuantity || 1))
+    });
+    setLoadoutBusy(false);
+    if (error) return setToolMessage(error.message);
+    closeLoadoutEditor();
+    await loadLoadoutStrip();
+    onSaved();
+  }
+
+  useEffect(() => {
+    function pointerMove(event: globalThis.PointerEvent) {
+      if (!loadoutDraggingItem.current) return;
+      event.preventDefault();
+      setLoadoutDragGhost({ item: loadoutDraggingItem.current, x: event.clientX, y: event.clientY });
+
+      const element = document.elementFromPoint(event.clientX, event.clientY);
+      const loadoutElement = element?.closest('[data-loadout-slot]') as HTMLElement | null;
+      const inventoryElement = element?.closest('[data-inventory-slot]') as HTMLElement | null;
+
+      if (loadoutElement?.dataset.loadoutSlot) {
+        const slot = loadoutElement.dataset.loadoutSlot as LoadoutSlotKey;
+        loadoutDragTarget.current = { kind: 'loadout', slot };
+        setHoveredLoadoutSlot(slot);
+      } else if (inventoryElement) {
+        const slot = Number(inventoryElement.dataset.slotIndex);
+        const parentId = inventoryElement.dataset.parentId === 'main' ? null : inventoryElement.dataset.parentId ?? null;
+        loadoutDragTarget.current = Number.isFinite(slot) ? { kind: 'inventory', slot, parentId } : null;
+        setHoveredLoadoutSlot(null);
+      } else {
+        loadoutDragTarget.current = null;
+        setHoveredLoadoutSlot(null);
+      }
+    }
+
+    function pointerUp() {
+      if (loadoutDragTimer.current) clearTimeout(loadoutDragTimer.current);
+      loadoutDragTimer.current = null;
+      const item = loadoutDraggingItem.current;
+      const target = loadoutDragTarget.current;
+
+      if (item) {
+        suppressLoadoutClick.current = true;
+        window.setTimeout(() => {
+          suppressLoadoutClick.current = false;
+        }, 100);
+
+        if (target?.kind === 'loadout') {
+          void equipItemToSlot(item.id, target.slot);
+        } else if (target?.kind === 'inventory') {
+          void moveLoadoutItemToInventorySlot(item, target.slot, target.parentId);
+        }
+      }
+
+      resetLoadoutDrag();
+    }
+
+    window.addEventListener('pointermove', pointerMove, { passive: false });
+    window.addEventListener('pointerup', pointerUp);
+    window.addEventListener('pointercancel', pointerUp);
+    return () => {
+      window.removeEventListener('pointermove', pointerMove);
+      window.removeEventListener('pointerup', pointerUp);
+      window.removeEventListener('pointercancel', pointerUp);
+      resetLoadoutDrag();
+    };
+  }, [character.id, mayManage]);
 
   function setAttribute(key: keyof CharacterAttributes, value: number) {
     setForm((current) => ({ ...current, attributes: { ...current.attributes, [key]: value } }));
@@ -362,7 +614,24 @@ export default function CharacterSheet({
     const filledClass = item ? `loadout-filled rarity-card ${rarityClass(item.rarity)}` : '';
     return (
       <div
-        className={`loadout-drop-slot surface-soft min-h-24 rounded-xl border p-3 ${filledClass} ${active ? 'loadout-drop-slot-active' : ''}`}
+        data-loadout-slot={slot}
+        role={item ? 'button' : undefined}
+        tabIndex={item ? 0 : undefined}
+        draggable={!!item && mayManage}
+        className={`loadout-drop-slot surface-soft min-h-24 rounded-xl border p-3 ${filledClass} ${active ? 'loadout-drop-slot-active' : ''} ${loadoutDraggingItemId === item?.id ? 'inventory-slot-dragging' : ''} ${item ? 'cursor-pointer active:scale-[0.98]' : ''}`}
+        onDragStart={(event) => item && beginLoadoutNativeDrag(item, event)}
+        onDragEnd={() => setLoadoutDraggingItemId(null)}
+        onPointerDown={(event) => item && beginLoadoutLongPress(item, event)}
+        onClick={() => {
+          if (suppressLoadoutClick.current) return;
+          if (item) openLoadoutItem(item);
+        }}
+        onKeyDown={(event) => {
+          if (item && (event.key === 'Enter' || event.key === ' ')) {
+            event.preventDefault();
+            openLoadoutItem(item);
+          }
+        }}
         onDragOver={(event) => {
           event.preventDefault();
           event.dataTransfer.dropEffect = 'move';
@@ -370,7 +639,7 @@ export default function CharacterSheet({
         }}
         onDragLeave={() => setHoveredLoadoutSlot((current) => (current === slot ? null : current))}
         onDrop={(event) => equipDroppedItem(slot, event)}
-        title={`Drag a ${label.toLowerCase()} item here to equip it.`}
+        title={item ? `${displayName} — click to inspect/edit. Drag or hold to move.` : `Drag a ${label.toLowerCase()} item here to equip it.`}
       >
         <div className="mb-2 flex items-center gap-2 text-[var(--brass)]">
           <Icon size={15} />
@@ -683,6 +952,111 @@ export default function CharacterSheet({
           <LoadoutSlot label="Active pet" slot="pet" icon={PawPrint} item={activePetItem} fallbackName={activeAnimal?.custom_name || activeAnimal?.property_name || undefined} />
         </div>
       </section>
+
+      {selectedLoadoutItem && (
+        <Modal onClose={closeLoadoutEditor}>
+          <form onSubmit={saveLoadoutItem} className="surface max-h-[90vh] w-[min(94vw,38rem)] overflow-y-auto rounded-2xl p-4 sm:p-5">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <p className="eyebrow mb-2">Active loadout item</p>
+                <h3 className="text-2xl font-black">{selectedLoadoutItem.item_name}</h3>
+                <p className="mt-1 text-xs text-[var(--muted)]">Equipped in the active loadout. Click save after edits, or unequip it to return it to carried inventory only.</p>
+              </div>
+              <button type="button" onClick={closeLoadoutEditor} className="rounded-full border border-[var(--line)] p-2 text-[var(--muted)]" aria-label="Close"><X size={17} /></button>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="sm:col-span-2">
+                <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Item name</span>
+                <input className="field" value={loadoutForm.item_name} onChange={(event) => setLoadoutForm({ ...loadoutForm, item_name: event.target.value })} readOnly={!canEdit} />
+              </label>
+              <label>
+                <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Type</span>
+                <select className="field" value={String(loadoutForm.item_type)} onChange={(event) => setLoadoutForm({ ...loadoutForm, item_type: event.target.value as InventoryItemType, legendary_weapon: event.target.value === 'weapon' ? loadoutForm.legendary_weapon : false })} disabled={!canEdit}>
+                  {grantItemTypes.map((entry) => <option key={String(entry.value)} value={String(entry.value)}>{entry.label}</option>)}
+                </select>
+              </label>
+              <label>
+                <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Quantity</span>
+                <NumberInput className="field" min={1} value={loadoutForm.quantity} onValueChange={(quantity) => setLoadoutForm({ ...loadoutForm, quantity })} disabled={!canEdit} />
+              </label>
+
+              {String(loadoutForm.item_type) === 'weapon' && spells.length > 0 && (
+                <label className="sm:col-span-2">
+                  <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Imbued spell</span>
+                  <select className="field" value={loadoutForm.imbued_spell_id} onChange={(event) => setLoadoutForm({ ...loadoutForm, imbued_spell_id: event.target.value })} disabled={!canEdit}>
+                    <option value="">No imbued spell</option>
+                    {spells.map((spell) => <option key={spell.id} value={spell.id}>{spell.category} · {spell.name}</option>)}
+                  </select>
+                </label>
+              )}
+
+              {String(loadoutForm.item_type) === 'weapon' && (
+                <label className="flex items-start gap-3 rounded-xl border border-[#d1a85b45] bg-[#d1a85b0d] p-3 sm:col-span-2">
+                  <input type="checkbox" className="mt-1" checked={loadoutForm.legendary_weapon} onChange={(event) => setLoadoutForm({ ...loadoutForm, legendary_weapon: event.target.checked })} disabled={!canEdit} />
+                  <span className="grid flex-1 gap-2">
+                    <span className="text-xs font-black uppercase tracking-wider text-[var(--brass)]">Legendary weapon</span>
+                    <span className="text-xs leading-5 text-[var(--muted)]">Keeps the Legendary effect in inventory and active loadout.</span>
+                    {loadoutForm.legendary_weapon && (
+                      <textarea className="field min-h-20" value={loadoutForm.legendary_description} onChange={(event) => setLoadoutForm({ ...loadoutForm, legendary_description: event.target.value })} placeholder="What does this legendary weapon do?" readOnly={!canEdit} />
+                    )}
+                  </span>
+                </label>
+              )}
+
+              <label className="flex items-start gap-3 rounded-xl border border-[#d1a85b45] bg-[#d1a85b0d] p-3 sm:col-span-2">
+                <input type="checkbox" className="mt-1" checked={loadoutForm.modifiers_enabled} onChange={(event) => setLoadoutForm({ ...loadoutForm, modifiers_enabled: event.target.checked })} disabled={!canEdit} />
+                <span className="grid flex-1 gap-2">
+                  <span className="text-xs font-black uppercase tracking-wider text-[var(--brass)]">Item modifiers</span>
+                  <span className="text-xs leading-5 text-[var(--muted)]">Only applies while this item is equipped in the active loadout.</span>
+                  {loadoutForm.modifiers_enabled && (
+                    <div className="modifier-input-grid">
+                      {ATTRIBUTE_KEYS.map((key) => (
+                        <label key={key}>
+                          <span>{ATTRIBUTE_LABELS[key]}</span>
+                          <input
+                            className="field px-2 py-2 text-center"
+                            type="number"
+                            step="1"
+                            value={loadoutForm.modifiers[key]}
+                            onChange={(event) => setLoadoutForm({ ...loadoutForm, modifiers: { ...loadoutForm.modifiers, [key]: event.target.value } })}
+                            placeholder="0"
+                            readOnly={!canEdit}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </span>
+              </label>
+            </div>
+
+            {toolMessage && <p className="mt-3 whitespace-pre-line text-xs text-[var(--muted)]">{toolMessage}</p>}
+
+            {loadoutAction === 'drop' && (
+              <div className="mt-4 rounded-xl border border-[#d76a6255] bg-[#d76a620d] p-3">
+                <p className="text-sm font-black text-[var(--red)]">Drop {selectedLoadoutItem.item_name}?</p>
+                <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
+                  <NumberInput className="field" min={1} max={selectedLoadoutItem.quantity} value={loadoutQuantity} onValueChange={setLoadoutQuantity} />
+                  <button type="button" onClick={dropLoadoutItem} disabled={loadoutBusy} className="rounded-xl border border-[#d76a6255] px-4 text-sm font-black text-[var(--red)] disabled:opacity-40">Confirm</button>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-5 flex flex-wrap gap-2">
+              {mayManage && <button type="button" onClick={unequipLoadoutItem} disabled={loadoutBusy} className="rounded-xl border border-[var(--line)] px-4 py-3 text-sm font-black text-[var(--muted)] disabled:opacity-40">Unequip</button>}
+              {mayManage && <button type="button" onClick={() => { setLoadoutAction('drop'); setLoadoutQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#d76a6255] px-4 py-3 text-sm font-black text-[var(--red)]"><Trash2 size={16} /> Drop</button>}
+              {canEdit && <button type="submit" disabled={loadoutBusy || !loadoutForm.item_name.trim()} className="primary-button ml-auto rounded-xl px-4 py-3 text-sm font-black disabled:opacity-40">Save item</button>}
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {loadoutDragGhost && (
+        <div className="pointer-events-none fixed z-[100] rounded-xl border border-[var(--brass)] bg-[#1a0d05f2] px-3 py-2 text-xs font-black shadow-2xl" style={{ left: loadoutDragGhost.x + 12, top: loadoutDragGhost.y + 12 }}>
+          {loadoutDragGhost.item.item_name} ×{loadoutDragGhost.item.quantity}
+        </div>
+      )}
 
       <InventoryPanel character={character} canEdit={canEdit} profile={profile} />
       {character.class_key === 'beastmaster' && <TamedBeastsPanel character={character} profile={profile} readOnly={readOnly} />}
