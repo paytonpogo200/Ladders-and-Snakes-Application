@@ -156,10 +156,9 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
   useEffect(() => {
     function pointerMove(event: PointerEvent) {
       const candidate = dragCandidate.current;
-      if (candidate && !draggingItem.current && Math.hypot(event.clientX - candidate.x, event.clientY - candidate.y) > 9) {
-        if (dragTimer.current) clearTimeout(dragTimer.current);
-        dragTimer.current = null;
-        dragCandidate.current = null;
+      if (candidate && !draggingItem.current) {
+        event.preventDefault();
+        setAutoScroll(event.clientY < 92 ? -1 : event.clientY > window.innerHeight - 92 ? 1 : 0);
       }
       if (!draggingItem.current) return;
       event.preventDefault();
@@ -340,6 +339,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
         key={slot}
         type="button"
         data-inventory-slot
+        data-inventory-item={item ? 'true' : 'false'}
         data-parent-id={parentId ?? 'main'}
         data-slot-index={slot}
         onPointerDown={(event) => item && beginLongPress(item, event)}

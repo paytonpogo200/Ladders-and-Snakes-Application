@@ -298,6 +298,10 @@ h3,
   transform: scale(0.96);
 }
 
+.inventory-slot[data-inventory-item="true"] {
+  touch-action: none;
+}
+
 .inventory-slot-target {
   border-color: var(--brass) !important;
   box-shadow: 0 0 0 3px rgba(224, 166, 78, 0.2), 0 0 22px rgba(224, 166, 78, 0.28);
