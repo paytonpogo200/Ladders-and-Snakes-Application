@@ -531,3 +531,54 @@ body.inventory-drag-active {
   letter-spacing: .045em;
   text-transform: uppercase;
 }
+
+/* Legendary display text + mobile inventory polish */
+.inventory-enchanted-outline {
+  border-color: #2fbf9f !important;
+  box-shadow: 0 0 0 1px rgba(47, 191, 159, .34), 0 0 20px rgba(47, 191, 159, .2), inset 0 0 22px rgba(47, 191, 159, .08);
+}
+
+.inventory-enchanted-outline::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border: 1px solid rgba(86, 226, 194, .28);
+  border-radius: .7rem;
+  pointer-events: none;
+}
+
+.loadout-imbued-spell {
+  margin-top: .25rem;
+  color: #56e2c2;
+  font-size: .66rem;
+  font-weight: 950;
+  letter-spacing: .055em;
+  line-height: .95rem;
+  text-transform: uppercase;
+  text-shadow: 0 0 10px rgba(86, 226, 194, .22);
+}
+
+.loadout-legendary-display {
+  margin-top: .25rem;
+  color: #ffd166;
+  font-size: .68rem;
+  font-weight: 950;
+  letter-spacing: .04em;
+  line-height: 1rem;
+  text-transform: uppercase;
+  text-shadow: 0 0 12px rgba(255, 209, 102, .2);
+}
+
+@media (max-width: 639px) {
+  .inventory-slot {
+    min-width: 0;
+    gap: .15rem;
+  }
+
+  .inventory-item-name {
+    max-width: 100%;
+    font-size: .68rem;
+    line-height: .9rem;
+    overflow-wrap: anywhere;
+  }
+}
