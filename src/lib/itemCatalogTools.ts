@@ -61,10 +61,10 @@ export function isPotionItem(itemType?: string | null, itemName = '') {
 
 export function potionEffect(itemName: string): { kind: 'hp' | 'mana'; amount: number } | null {
   const lower = itemName.toLowerCase();
-  const amount = lower.includes('greatest') ? 250 : lower.includes('greater') ? 75 : lower.includes('lesser') ? 25 : 0;
-  if (amount <= 0) return null;
-  if (lower.includes('healing')) return { kind: 'hp', amount };
-  if (lower.includes('mana')) return { kind: 'mana', amount };
+  const tier = lower.includes('greatest') ? 'greatest' : lower.includes('greater') ? 'greater' : lower.includes('lesser') ? 'lesser' : null;
+  if (!tier) return null;
+  if (lower.includes('healing')) return { kind: 'hp', amount: tier === 'greatest' ? Number.POSITIVE_INFINITY : tier === 'greater' ? 50 : 20 };
+  if (lower.includes('mana')) return { kind: 'mana', amount: tier === 'greatest' ? Number.POSITIVE_INFINITY : tier === 'greater' ? 40 : 15 };
   return null;
 }
 

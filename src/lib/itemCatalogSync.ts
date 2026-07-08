@@ -6,7 +6,7 @@ type SupabaseLike = {
   from: (table: string) => any;
 };
 
-const SYNC_KEY = 'ladders-snakes-item-catalog-sync-2026-07-08-potions';
+const SYNC_KEY = 'ladders-snakes-item-catalog-sync-2026-07-08-potion-balance';
 
 function storagePatch(entry: ItemCatalogEntry) {
   const storageCapacity = entry.item_type === 'storage' ? Math.max(1, storageCapacityForItem(entry.name) || 1) : 0;
@@ -18,8 +18,9 @@ function storagePatch(entry: ItemCatalogEntry) {
 
 function potionDescription(name: string) {
   const effect = potionEffect(name);
-  if (effect?.kind === 'hp') return `+${effect.amount} Health. Fine quality.`;
-  if (effect?.kind === 'mana') return `+${effect.amount} Mana. Fine quality.`;
+  const amount = effect && Number.isFinite(effect.amount) ? `+${effect.amount}` : 'Full';
+  if (effect?.kind === 'hp') return `${amount} Health Recovery. Fine quality.`;
+  if (effect?.kind === 'mana') return `${amount} Mana Recovery. Fine quality.`;
   return null;
 }
 

@@ -148,12 +148,12 @@ const spellProducts: SeedProduct[] = CALOSTRYNN_SPELLS.map((spell) =>
 );
 
 const potionLines = [
-  ['healing', 'Healing', ['+25 Health', '+75 Health', '+250 Health'], [80, 300, 1200], [6, 3, 1]],
+  ['healing', 'Healing', ['+20 Health', '+50 Health', 'Full Health Recovery'], [80, 300, 1200], [6, 3, 1]],
   ['swiftness', 'Swiftness', ['+1 Speed', '+2 Speed', '+5 Speed'], [80, 300, 1500], [4, 2, 1]],
   ['agility', 'Agility', ['+1 Agility', '+2 Agility', '+5 Agility'], [80, 300, 1600], [4, 2, 1]],
   ['strength', 'Strength', ['+1 Strength', '+2 Strength', '+5 Strength'], [80, 300, 1500], [4, 2, 1]],
   ['sorcery', 'Sorcery', ['+1 Intelligence', '+2 Intelligence', '+5 Intelligence'], [100, 400, 1800], [3, 2, 1]],
-  ['mana', 'Mana', ['+25 Mana', '+75 Mana', '+250 Mana'], [200, 600, 2200], [3, 2, 1]],
+  ['mana', 'Mana', ['+15 Mana', '+40 Mana', 'Full Mana Recovery'], [200, 600, 2200], [3, 2, 1]],
   ['luck', 'Luck', ['+1 to rolls', '+3 to rolls', '+5 to rolls'], [10000, 70000, 300000], [1, 0, 0]],
   ['antidote', 'Antidote', ['Removes poison', 'Removes poison and grants resistance for 3 turns', 'Removes poison and grants immunity for 1 scene'], [60, 150, 400], [6, 3, 1]],
   ['warming', 'Warming', ['Protects from cold for 1 scene', 'Protects from extreme cold for 1 scene', 'Protects from cold, frost damage, and slowing for 1 scene'], [80, 200, 600], [4, 2, 1]],

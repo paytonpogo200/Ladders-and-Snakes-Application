@@ -575,7 +575,8 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
 
     setBusy(false);
     if (itemResult.error) return setMessage(itemResult.error.message);
-    const restoreText = effect ? ` ${effect.kind === 'hp' ? 'Restored Health' : 'Restored Mana'} by ${effect.amount}.` : '';
+    const restoreAmountText = effect && Number.isFinite(effect.amount) ? `by ${effect.amount}` : 'to full';
+    const restoreText = effect ? ` ${effect.kind === 'hp' ? 'Restored Health' : 'Restored Mana'} ${restoreAmountText}.` : '';
     setMessage(`${selectedItem.item_name} consumed.${restoreText} Empty glass flask recovered.`);
     closeEditor();
     await loadItems();
