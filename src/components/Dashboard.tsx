@@ -27,7 +27,7 @@ const PersonalScroll = dynamic(() => import('@/components/PersonalScroll'), { lo
 const AssetsManager = dynamic(() => import('@/components/AssetsManager'), { loading: () => <PanelLoading label="Update Assets" />, ssr: false });
 
 export default function Dashboard({ profile, userEmail }: { profile: Profile; userEmail: string }) {
-  const [tab, setTab] = useState<'battle' | 'characters' | 'cities' | 'bestiary' | 'exploration' | 'scroll' | 'assets'>('battle');
+  const [tab, setTab] = useState<'battle' | 'characters' | 'cities' | 'bestiary' | 'exploration' | 'scroll' | 'assets'>('characters');
   const [activeBattle, setActiveBattle] = useState(false);
   const router = useRouter();
   const isDm = profile.role === 'dm';

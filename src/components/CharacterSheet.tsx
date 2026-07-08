@@ -458,7 +458,20 @@ export default function CharacterSheet({
     event.dataTransfer.setData('application/x-loadout-source', 'true');
     event.dataTransfer.setData('text/plain', item.id);
     event.dataTransfer.effectAllowed = 'move';
+    const dragImage = document.createElement('canvas');
+    dragImage.width = 1;
+    dragImage.height = 1;
+    event.dataTransfer.setDragImage(dragImage, 0, 0);
     setLoadoutDraggingItemId(item.id);
+    loadoutDraggingItem.current = item;
+    setLoadoutDragGhost({ item, x: event.clientX, y: event.clientY });
+    document.body.classList.add('inventory-drag-active');
+  }
+
+  function moveLoadoutNativeDrag(item: InventoryItemWithModifiers, event: DragEvent<HTMLDivElement>) {
+    if (!mayManage || event.clientX === 0 && event.clientY === 0) return;
+    setLoadoutDraggingItemId(item.id);
+    setLoadoutDragGhost({ item, x: event.clientX, y: event.clientY });
   }
 
   function openLoadoutItem(item: InventoryItemWithModifiers) {
@@ -694,7 +707,8 @@ export default function CharacterSheet({
         draggable={!!item && mayManage}
         className={`loadout-drop-slot surface-soft min-h-24 rounded-xl border p-3 ${filledClass} ${active ? 'loadout-drop-slot-active' : ''} ${loadoutDraggingItemId === item?.id ? 'inventory-slot-dragging' : ''} ${item ? 'cursor-pointer active:scale-[0.98]' : ''}`}
         onDragStart={(event) => item && beginLoadoutNativeDrag(item, event)}
-        onDragEnd={() => setLoadoutDraggingItemId(null)}
+        onDrag={(event) => item && moveLoadoutNativeDrag(item, event)}
+        onDragEnd={resetLoadoutDrag}
         onPointerDown={(event) => item && beginLoadoutLongPress(item, event)}
         onClick={() => {
           if (suppressLoadoutClick.current) return;
@@ -1152,8 +1166,10 @@ export default function CharacterSheet({
       )}
 
       {loadoutDragGhost && (
-        <div className={`inventory-drag-ghost pointer-events-none fixed z-[100] rounded-xl border px-3 py-2 text-xs font-black shadow-2xl ${rarityClass(loadoutDragGhost.item.rarity)} ${imbuedSpellName(loadoutDragGhost.item.notes) ? 'inventory-enchanted-outline' : ''}`} style={{ left: loadoutDragGhost.x + 12, top: loadoutDragGhost.y + 12 }}>
-          {loadoutDragGhost.item.item_name} ×{loadoutDragGhost.item.quantity}
+        <div className={`inventory-drag-ghost loadout-drag-ghost-cell pointer-events-none fixed z-[100] rounded-xl border p-2 text-xs font-black shadow-2xl ${rarityClass(loadoutDragGhost.item.rarity)} ${imbuedSpellName(loadoutDragGhost.item.notes) ? 'inventory-enchanted-outline' : ''}`} style={{ left: loadoutDragGhost.x + 14, top: loadoutDragGhost.y + 14 }}>
+          <span className="block text-[9px] uppercase tracking-wider text-[var(--brass)]">Moving</span>
+          <span className="mt-1 line-clamp-2 block leading-4">{loadoutDragGhost.item.item_name}</span>
+          {loadoutDragGhost.item.quantity > 1 && <span className="mt-1 inline-flex rounded-full bg-black/40 px-2 py-0.5 text-[10px]">×{loadoutDragGhost.item.quantity}</span>}
         </div>
       )}
 
