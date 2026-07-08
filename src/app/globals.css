@@ -373,6 +373,18 @@ h3,
   outline-offset: 2px;
 }
 
+.loadout-drag-ghost-cell {
+  width: 6.75rem;
+  min-width: 6.75rem;
+  min-height: 6.75rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-width: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 4, 1, .55), 0 12px 36px rgba(0, 0, 0, .45), inset 0 0 26px rgba(0, 0, 0, .25);
+}
+
 body.inventory-drag-active {
   user-select: none;
   overscroll-behavior: contain;
