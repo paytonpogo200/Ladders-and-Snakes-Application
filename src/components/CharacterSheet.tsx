@@ -185,6 +185,7 @@ export default function CharacterSheet({
   });
   const [toolMessage, setToolMessage] = useState('');
   const [hoveredLoadoutSlot, setHoveredLoadoutSlot] = useState<LoadoutSlotKey | null>(null);
+  const [hoveredInventorySlot, setHoveredInventorySlot] = useState<string | null>(null);
   const [selectedLoadoutItem, setSelectedLoadoutItem] = useState<InventoryItemWithModifiers | null>(null);
   const [loadoutAction, setLoadoutAction] = useState<'inspect' | 'drop'>('inspect');
   const [loadoutQuantity, setLoadoutQuantity] = useState(1);
@@ -220,6 +221,10 @@ export default function CharacterSheet({
   function loadoutSlotLabel(slot: LoadoutSlotKey) {
     if (slot.startsWith('accessory')) return `Accessory ${slot.split('-')[1]}`;
     return slot === 'pet' ? 'Active pet' : slot.charAt(0).toUpperCase() + slot.slice(1);
+  }
+
+  function inventorySlotKey(slot: number, parentId: string | null) {
+    return `${parentId ?? 'main'}:${slot}`;
   }
 
   function resetGrantForm() {
@@ -435,6 +440,7 @@ export default function CharacterSheet({
     setLoadoutDraggingItemId(null);
     setLoadoutDragGhost(null);
     setHoveredLoadoutSlot(null);
+    setHoveredInventorySlot(null);
     document.body.classList.remove('inventory-drag-active');
   }
 
@@ -573,9 +579,11 @@ export default function CharacterSheet({
         const parentId = inventoryElement.dataset.parentId === 'main' ? null : inventoryElement.dataset.parentId ?? null;
         loadoutDragTarget.current = Number.isFinite(slot) ? { kind: 'inventory', slot, parentId } : null;
         setHoveredLoadoutSlot(null);
+        setHoveredInventorySlot(Number.isFinite(slot) ? inventorySlotKey(slot, parentId) : null);
       } else {
         loadoutDragTarget.current = null;
         setHoveredLoadoutSlot(null);
+        setHoveredInventorySlot(null);
       }
     }
 
@@ -1155,14 +1163,13 @@ export default function CharacterSheet({
       )}
 
       {loadoutDragGhost && (
-        <div className={`inventory-slot inventory-drag-ghost loadout-drag-ghost-cell pointer-events-none fixed z-[100] rounded-xl border p-2 text-xs font-black shadow-2xl ${rarityClass(loadoutDragGhost.item.rarity)} ${imbuedSpellName(loadoutDragGhost.item.notes) ? 'inventory-enchanted-outline loadout-enchanted-outline' : ''}`} style={{ left: loadoutDragGhost.x + 12, top: loadoutDragGhost.y + 12 }}>
-          <span className="block text-[9px] uppercase tracking-wider text-[var(--brass)]">Moving</span>
+        <div className={`inventory-drag-ghost inventory-slot-sized-ghost loadout-drag-ghost-cell pointer-events-none rounded-xl border p-2 text-xs font-black shadow-2xl ${rarityClass(loadoutDragGhost.item.rarity)} ${imbuedSpellName(loadoutDragGhost.item.notes) ? 'inventory-enchanted-outline loadout-enchanted-outline' : ''}`} style={{ left: loadoutDragGhost.x + 12, top: loadoutDragGhost.y + 12 }}>
           <span className="mt-1 line-clamp-2 block leading-4">{loadoutDragGhost.item.item_name}</span>
           {loadoutDragGhost.item.quantity > 1 && <span className="mt-1 inline-flex rounded-full bg-black/40 px-2 py-0.5 text-[10px]">×{loadoutDragGhost.item.quantity}</span>}
         </div>
       )}
 
-      <InventoryPanel character={character} canEdit={canEdit} profile={profile} refreshSignal={inventoryRefreshSignal} />
+      <InventoryPanel character={character} canEdit={canEdit} profile={profile} refreshSignal={inventoryRefreshSignal} externalDragTargetKey={hoveredInventorySlot} />
       {character.class_key === 'beastmaster' && <TamedBeastsPanel character={character} profile={profile} readOnly={readOnly} />}
       <PropertyPanel character={character} profile={profile} readOnly={readOnly} />
     </div>

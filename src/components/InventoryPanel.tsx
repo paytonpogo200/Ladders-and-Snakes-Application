@@ -100,7 +100,7 @@ function ItemIcon({ type, size = 19 }: { type: InventoryItemType; size?: number 
   return <Icon size={size} />;
 }
 
-export default function InventoryPanel({ character, canEdit, profile, refreshSignal = 0 }: { character: Character; canEdit: boolean; profile: Profile; refreshSignal?: number }) {
+export default function InventoryPanel({ character, canEdit, profile, refreshSignal = 0, externalDragTargetKey = null }: { character: Character; canEdit: boolean; profile: Profile; refreshSignal?: number; externalDragTargetKey?: string | null }) {
   const supabase = useMemo(() => createClient(), []);
   const [items, setItems] = useState<InventoryItemWithLock[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -503,7 +503,7 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
         }}
         className={`inventory-slot relative flex aspect-square min-h-24 flex-col items-center justify-center rounded-xl border p-2 text-center transition active:scale-95 sm:min-h-16 sm:p-2 ${
           item ? rarityClass(item.rarity) : 'border-dashed border-[var(--line)] bg-black/10'
-        } ${enchantedClass} ${!item && !canEdit ? 'cursor-default' : ''} ${draggingItemId === item?.id ? 'inventory-slot-dragging' : ''} ${dragTargetKey === key ? 'inventory-slot-target' : ''}`}
+        } ${enchantedClass} ${!item && !canEdit ? 'cursor-default' : ''} ${draggingItemId === item?.id ? 'inventory-slot-dragging' : ''} ${dragTargetKey === key || externalDragTargetKey === key ? 'inventory-slot-target' : ''}`}
       >
         <span className="pointer-events-none absolute left-2 top-1.5 text-[9px] font-black text-[var(--muted)]">{slot + 1}</span>
         {item ? (
