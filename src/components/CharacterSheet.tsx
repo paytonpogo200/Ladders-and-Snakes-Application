@@ -207,6 +207,7 @@ export default function CharacterSheet({
     modifiers: emptyModifierForm()
   });
   const loadoutDragTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadoutDragCandidate = useRef<{ item: InventoryItemWithModifiers; x: number; y: number } | null>(null);
   const loadoutDraggingItem = useRef<InventoryItemWithModifiers | null>(null);
   const loadoutDragTarget = useRef<{ kind: 'loadout'; slot: LoadoutSlotKey } | { kind: 'inventory'; slot: number; parentId: string | null } | null>(null);
   const suppressLoadoutClick = useRef(false);
@@ -428,6 +429,7 @@ export default function CharacterSheet({
   function resetLoadoutDrag() {
     if (loadoutDragTimer.current) clearTimeout(loadoutDragTimer.current);
     loadoutDragTimer.current = null;
+    loadoutDragCandidate.current = null;
     loadoutDraggingItem.current = null;
     loadoutDragTarget.current = null;
     setLoadoutDraggingItemId(null);
@@ -436,42 +438,26 @@ export default function CharacterSheet({
     document.body.classList.remove('inventory-drag-active');
   }
 
-  function beginLoadoutLongPress(item: InventoryItemWithModifiers, event: PointerEvent<HTMLDivElement>) {
+  function startLoadoutDrag(item: InventoryItemWithModifiers, x: number, y: number) {
+    if (!mayManage || loadoutDraggingItem.current?.id === item.id) return;
+    if (loadoutDragTimer.current) clearTimeout(loadoutDragTimer.current);
+    loadoutDragTimer.current = null;
+    suppressLoadoutClick.current = true;
+    setLoadoutDraggingItemId(item.id);
+    loadoutDraggingItem.current = item;
+    setLoadoutDragGhost({ item, x, y });
+    document.body.classList.add('inventory-drag-active');
+    if (navigator.vibrate) navigator.vibrate(18);
+  }
+
+  function beginLoadoutPointerDrag(item: InventoryItemWithModifiers, event: PointerEvent<HTMLDivElement>) {
     if (!mayManage || event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     if (loadoutDragTimer.current) clearTimeout(loadoutDragTimer.current);
+    loadoutDragCandidate.current = { item, x: event.clientX, y: event.clientY };
     loadoutDragTimer.current = setTimeout(() => {
-      loadoutDraggingItem.current = item;
-      setLoadoutDraggingItemId(item.id);
-      setLoadoutDragGhost({ item, x: event.clientX, y: event.clientY });
-      document.body.classList.add('inventory-drag-active');
-      if (navigator.vibrate) navigator.vibrate(18);
-    }, 380);
-  }
-
-  function beginLoadoutNativeDrag(item: InventoryItemWithModifiers, event: DragEvent<HTMLDivElement>) {
-    if (!mayManage) {
-      event.preventDefault();
-      return;
-    }
-    event.dataTransfer.setData('application/x-inventory-item-id', item.id);
-    event.dataTransfer.setData('application/x-loadout-source', 'true');
-    event.dataTransfer.setData('text/plain', item.id);
-    event.dataTransfer.effectAllowed = 'move';
-    const dragImage = document.createElement('canvas');
-    dragImage.width = 1;
-    dragImage.height = 1;
-    event.dataTransfer.setDragImage(dragImage, 0, 0);
-    setLoadoutDraggingItemId(item.id);
-    loadoutDraggingItem.current = item;
-    setLoadoutDragGhost({ item, x: event.clientX, y: event.clientY });
-    document.body.classList.add('inventory-drag-active');
-  }
-
-  function moveLoadoutNativeDrag(item: InventoryItemWithModifiers, event: DragEvent<HTMLDivElement>) {
-    if (!mayManage || event.clientX === 0 && event.clientY === 0) return;
-    setLoadoutDraggingItemId(item.id);
-    setLoadoutDragGhost({ item, x: event.clientX, y: event.clientY });
+      startLoadoutDrag(item, event.clientX, event.clientY);
+    }, 240);
   }
 
   function openLoadoutItem(item: InventoryItemWithModifiers) {
@@ -565,6 +551,11 @@ export default function CharacterSheet({
 
   useEffect(() => {
     function pointerMove(event: globalThis.PointerEvent) {
+      const candidate = loadoutDragCandidate.current;
+      if (candidate && !loadoutDraggingItem.current) {
+        const moved = Math.hypot(event.clientX - candidate.x, event.clientY - candidate.y);
+        if (moved > 6) startLoadoutDrag(candidate.item, event.clientX, event.clientY);
+      }
       if (!loadoutDraggingItem.current) return;
       event.preventDefault();
       setLoadoutDragGhost({ item: loadoutDraggingItem.current, x: event.clientX, y: event.clientY });
@@ -591,6 +582,7 @@ export default function CharacterSheet({
     function pointerUp() {
       if (loadoutDragTimer.current) clearTimeout(loadoutDragTimer.current);
       loadoutDragTimer.current = null;
+      loadoutDragCandidate.current = null;
       const item = loadoutDraggingItem.current;
       const target = loadoutDragTarget.current;
 
@@ -704,12 +696,9 @@ export default function CharacterSheet({
         data-loadout-slot={slot}
         role={item ? 'button' : undefined}
         tabIndex={item ? 0 : undefined}
-        draggable={!!item && mayManage}
+        draggable={false}
         className={`loadout-drop-slot surface-soft min-h-24 rounded-xl border p-3 ${filledClass} ${active ? 'loadout-drop-slot-active' : ''} ${loadoutDraggingItemId === item?.id ? 'inventory-slot-dragging' : ''} ${item ? 'cursor-pointer active:scale-[0.98]' : ''}`}
-        onDragStart={(event) => item && beginLoadoutNativeDrag(item, event)}
-        onDrag={(event) => item && moveLoadoutNativeDrag(item, event)}
-        onDragEnd={resetLoadoutDrag}
-        onPointerDown={(event) => item && beginLoadoutLongPress(item, event)}
+        onPointerDown={(event) => item && beginLoadoutPointerDrag(item, event)}
         onClick={() => {
           if (suppressLoadoutClick.current) return;
           if (item) openLoadoutItem(item);
@@ -727,7 +716,7 @@ export default function CharacterSheet({
         }}
         onDragLeave={() => setHoveredLoadoutSlot((current) => (current === slot ? null : current))}
         onDrop={(event) => equipDroppedItem(slot, event)}
-        title={item ? `${displayName} — click to inspect/edit. Drag or hold to move.` : `Drag a ${label.toLowerCase()} item here to equip it.`}
+        title={item ? `${displayName} — click to inspect/edit. Drag to move.` : `Drag a ${label.toLowerCase()} item here to equip it.`}
       >
         <div className="mb-2 flex items-center gap-2 text-[var(--brass)]">
           <Icon size={15} />
@@ -1166,7 +1155,7 @@ export default function CharacterSheet({
       )}
 
       {loadoutDragGhost && (
-        <div className={`inventory-drag-ghost loadout-drag-ghost-cell pointer-events-none fixed z-[100] rounded-xl border p-2 text-xs font-black shadow-2xl ${rarityClass(loadoutDragGhost.item.rarity)} ${imbuedSpellName(loadoutDragGhost.item.notes) ? 'inventory-enchanted-outline' : ''}`} style={{ left: loadoutDragGhost.x + 14, top: loadoutDragGhost.y + 14 }}>
+        <div className={`inventory-slot inventory-drag-ghost loadout-drag-ghost-cell pointer-events-none fixed z-[100] rounded-xl border p-2 text-xs font-black shadow-2xl ${rarityClass(loadoutDragGhost.item.rarity)} ${imbuedSpellName(loadoutDragGhost.item.notes) ? 'inventory-enchanted-outline loadout-enchanted-outline' : ''}`} style={{ left: loadoutDragGhost.x + 12, top: loadoutDragGhost.y + 12 }}>
           <span className="block text-[9px] uppercase tracking-wider text-[var(--brass)]">Moving</span>
           <span className="mt-1 line-clamp-2 block leading-4">{loadoutDragGhost.item.item_name}</span>
           {loadoutDragGhost.item.quantity > 1 && <span className="mt-1 inline-flex rounded-full bg-black/40 px-2 py-0.5 text-[10px]">×{loadoutDragGhost.item.quantity}</span>}
