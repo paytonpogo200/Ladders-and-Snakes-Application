@@ -468,6 +468,20 @@ export default function CharacterSheet({
     }, 240);
   }
 
+  function beginLoadoutNativeDrag(item: InventoryItemWithModifiers, event: DragEvent<HTMLDivElement>) {
+    if (!mayManage) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.setData('application/x-inventory-item-id', item.id);
+    event.dataTransfer.setData('application/x-loadout-source', 'true');
+    event.dataTransfer.setData('text/plain', item.id);
+    event.dataTransfer.effectAllowed = 'move';
+    setLoadoutDraggingItemId(item.id);
+    loadoutDraggingItem.current = item;
+    document.body.classList.add('inventory-drag-active');
+  }
+
   function openLoadoutItem(item: InventoryItemWithModifiers) {
     const matchedSpell = spells.find((spell) => spell.name === imbuedSpellName(item.notes));
     setSelectedLoadoutItem(item);
@@ -710,8 +724,10 @@ export default function CharacterSheet({
         data-loadout-slot={slot}
         role={item ? 'button' : undefined}
         tabIndex={item ? 0 : undefined}
-        draggable={false}
+        draggable={!!item && mayManage}
         className={`loadout-drop-slot surface-soft min-h-24 rounded-xl border p-3 ${filledClass} ${active ? 'loadout-drop-slot-active' : ''} ${loadoutDraggingItemId === item?.id ? 'inventory-slot-dragging' : ''} ${item ? 'cursor-pointer active:scale-[0.98]' : ''}`}
+        onDragStart={(event) => item && beginLoadoutNativeDrag(item, event)}
+        onDragEnd={resetLoadoutDrag}
         onPointerDown={(event) => item && beginLoadoutPointerDrag(item, event)}
         onClick={() => {
           if (suppressLoadoutClick.current) return;

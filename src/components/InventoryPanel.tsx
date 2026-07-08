@@ -334,16 +334,29 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
   async function dropNativeDraggedItem(event: DragEvent<HTMLButtonElement>, slot: number, parentId: string | null) {
     const itemId = event.dataTransfer.getData('application/x-inventory-item-id') || event.dataTransfer.getData('text/plain');
     if (!itemId) return;
+    const fromLoadout = event.dataTransfer.getData('application/x-loadout-source') === 'true';
+    if (fromLoadout) {
+      event.preventDefault();
+      const { error: moveError } = await supabase.rpc('move_inventory_item_slot', {
+        target_item_id: itemId,
+        target_parent_item_id: parentId,
+        target_slot_index: slot
+      });
+      if (moveError) {
+        setMessage(moveError.message);
+        return;
+      }
+      await unequipItem(itemId);
+      setDragTargetKey(null);
+      await loadItems();
+      return;
+    }
     const dragged = items.find((entry) => entry.id === itemId);
     if (!dragged || dragged.is_storage) return;
 
     event.preventDefault();
-    const fromLoadout = event.dataTransfer.getData('application/x-loadout-source') === 'true';
     if (dragged.slot_index !== slot || dragged.parent_item_id !== parentId) {
       await moveItem(dragged, slot, parentId);
-    }
-    if (fromLoadout) {
-      await unequipItem(itemId);
     }
   }
 
@@ -493,8 +506,10 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
           if (Array.from(event.dataTransfer.types).includes('application/x-inventory-item-id')) {
             event.preventDefault();
             event.dataTransfer.dropEffect = 'move';
+            setDragTargetKey(key);
           }
         }}
+        onDragLeave={() => setDragTargetKey((current) => (current === key ? null : current))}
         onDrop={(event) => dropNativeDraggedItem(event, slot, parentId)}
         onPointerDown={(event) => item && beginLongPress(item, event)}
         onClick={() => {
