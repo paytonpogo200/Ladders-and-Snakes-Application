@@ -100,7 +100,7 @@ function ItemIcon({ type, size = 19 }: { type: InventoryItemType; size?: number 
   return <Icon size={size} />;
 }
 
-export default function InventoryPanel({ character, canEdit, profile }: { character: Character; canEdit: boolean; profile: Profile }) {
+export default function InventoryPanel({ character, canEdit, profile, refreshSignal = 0 }: { character: Character; canEdit: boolean; profile: Profile; refreshSignal?: number }) {
   const supabase = useMemo(() => createClient(), []);
   const [items, setItems] = useState<InventoryItemWithLock[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -217,6 +217,10 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     if (!capacityResult.error) setCapacities((capacityResult.data ?? []) as CharacterTransferCapacity[]);
     if (!spellResult.error) setSpells((spellResult.data ?? []) as Spell[]);
   }
+
+  useEffect(() => {
+    loadItems();
+  }, [refreshSignal]);
 
   useEffect(() => {
     loadItems();
@@ -358,7 +362,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
       imbued_spell_id: matchedSpell?.id ?? '',
       equipped: item.equipped,
       storage_capacity: item.storage_capacity ?? 0,
-      legendary_weapon: item.rarity === 'Legendary' && itemTypeValue(item) === 'weapon',
+      legendary_weapon: itemTypeValue(item) === 'weapon' && Boolean(legendaryDescription(item.notes) || legendaryDisplayText(item)),
       legendary_description: legendaryDescription(item.notes),
       legendary_display_text: legendaryDisplayText(item),
       modifiers_enabled: hasModifierValues(item.modifiers),
@@ -386,7 +390,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
       item_type: entry.item_type,
       rarity: entry.rarity || 'Common',
       storage_capacity: entry.item_type === 'storage' ? Math.max(1, storageCapacity || current.storage_capacity || 1) : storageCapacity,
-      legendary_weapon: entry.rarity === 'Legendary' && entry.item_type === 'weapon'
+      legendary_weapon: false
     }));
   }
 
@@ -617,7 +621,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
                 </label>
                 <label>
                   <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Rarity</span>
-                  <select className="field" value={form.rarity} onChange={(event) => setForm({ ...form, rarity: event.target.value, legendary_weapon: event.target.value === 'Legendary' && itemTypeValue(form) === 'weapon' ? true : form.legendary_weapon })}>
+                  <select className="field" value={form.rarity} onChange={(event) => setForm({ ...form, rarity: event.target.value })}>
                     {rarityOptions.map((rarity) => <option key={rarity} value={rarity}>{rarity}</option>)}
                   </select>
                 </label>
@@ -745,7 +749,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
       )}
 
       {dragGhost && (
-        <div className="pointer-events-none fixed z-[100] rounded-xl border border-[var(--brass)] bg-[#1a0d05f2] px-3 py-2 text-xs font-black shadow-2xl" style={{ left: dragGhost.x + 12, top: dragGhost.y + 12 }}>
+        <div className={`inventory-drag-ghost pointer-events-none fixed z-[100] rounded-xl border px-3 py-2 text-xs font-black shadow-2xl ${rarityClass(dragGhost.item.rarity)} ${imbuedSpellName(dragGhost.item.notes) ? 'inventory-enchanted-outline' : ''}`} style={{ left: dragGhost.x + 12, top: dragGhost.y + 12 }}>
           {dragGhost.item.item_name} ×{dragGhost.item.quantity}
         </div>
       )}

@@ -381,6 +381,7 @@ export type CharacterProperty = {
   property_name: string;
   custom_name: string;
   property_type: 'wagon' | 'animal' | 'property';
+  is_pet?: boolean;
   is_active_pet?: boolean;
   notes: string;
   source_product_id?: string | null;

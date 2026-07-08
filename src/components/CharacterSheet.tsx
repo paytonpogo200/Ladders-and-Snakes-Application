@@ -48,7 +48,7 @@ const grantItemTypes: { value: InventoryItemType; label: string }[] = [
 ];
 const rarityOptions = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Mythical'];
 
-type LoadoutSlotKey = 'weapon' | 'armor' | 'shield' | 'pet';
+type LoadoutSlotKey = 'weapon' | 'armor' | 'shield' | 'pet' | 'accessory-1' | 'accessory-2' | 'accessory-3' | 'accessory-4';
 type AttributeModifierMap = Partial<Record<keyof CharacterAttributes, number>>;
 type ModifierFormState = Record<keyof CharacterAttributes, string>;
 type InventoryItemWithModifiers = InventoryItem & { modifiers?: AttributeModifierMap | null; legendary_display_text?: string | null };
@@ -191,6 +191,7 @@ export default function CharacterSheet({
   const [loadoutBusy, setLoadoutBusy] = useState(false);
   const [loadoutDragGhost, setLoadoutDragGhost] = useState<{ item: InventoryItemWithModifiers; x: number; y: number } | null>(null);
   const [loadoutDraggingItemId, setLoadoutDraggingItemId] = useState<string | null>(null);
+  const [inventoryRefreshSignal, setInventoryRefreshSignal] = useState(0);
   const [loadoutForm, setLoadoutForm] = useState({
     item_name: '',
     quantity: 1,
@@ -209,6 +210,15 @@ export default function CharacterSheet({
   const loadoutDragTarget = useRef<{ kind: 'loadout'; slot: LoadoutSlotKey } | { kind: 'inventory'; slot: number; parentId: string | null } | null>(null);
   const suppressLoadoutClick = useRef(false);
   const mayManage = profile.role === 'dm' || character.owner_user_id === profile.id;
+
+  function refreshInventoryPanels() {
+    setInventoryRefreshSignal((value) => value + 1);
+  }
+
+  function loadoutSlotLabel(slot: LoadoutSlotKey) {
+    if (slot.startsWith('accessory')) return `Accessory ${slot.split('-')[1]}`;
+    return slot === 'pet' ? 'Active pet' : slot.charAt(0).toUpperCase() + slot.slice(1);
+  }
 
   function resetGrantForm() {
     setGrantForm({
@@ -340,8 +350,9 @@ export default function CharacterSheet({
       return false;
     }
 
-    setToolMessage(`${slot === 'pet' ? 'Pet' : slot.charAt(0).toUpperCase() + slot.slice(1)} equipped.`);
+    setToolMessage(`${loadoutSlotLabel(slot)} equipped.`);
     await loadLoadoutStrip();
+    refreshInventoryPanels();
     onSaved();
     return true;
   }
@@ -358,6 +369,7 @@ export default function CharacterSheet({
 
     setToolMessage('Active pet updated.');
     await loadLoadoutStrip();
+    refreshInventoryPanels();
     onSaved();
     return true;
   }
@@ -369,6 +381,14 @@ export default function CharacterSheet({
     const propertyId = event.dataTransfer.getData('application/x-character-property-id');
     if (slot === 'pet' && propertyId) {
       await equipPropertyAsPet(propertyId);
+      return;
+    }
+    if (slot === 'pet') {
+      setToolMessage('Active pet only accepts property tagged as a pet.');
+      return;
+    }
+    if (propertyId) {
+      setToolMessage('Pet property can only go in the active pet slot.');
       return;
     }
 
@@ -399,6 +419,7 @@ export default function CharacterSheet({
 
     setToolMessage(`${item.item_name} moved back to inventory.`);
     await loadLoadoutStrip();
+    refreshInventoryPanels();
     onSaved();
     return true;
   }
@@ -452,7 +473,7 @@ export default function CharacterSheet({
       imbued_spell_id: matchedSpell?.id ?? '',
       equipped: item.equipped,
       storage_capacity: item.storage_capacity ?? 0,
-      legendary_weapon: item.rarity === 'Legendary' && typeOfItem(item) === 'weapon',
+      legendary_weapon: typeOfItem(item) === 'weapon' && Boolean(legendaryDescription(item.notes) || legendaryDisplayText(item)),
       legendary_description: legendaryDescription(item.notes),
       legendary_display_text: legendaryDisplayText(item),
       modifiers_enabled: hasModifierValues(item.modifiers),
@@ -496,6 +517,7 @@ export default function CharacterSheet({
     if (result.error) return setToolMessage(result.error.message);
     closeLoadoutEditor();
     await loadLoadoutStrip();
+    refreshInventoryPanels();
     onSaved();
   }
 
@@ -507,6 +529,7 @@ export default function CharacterSheet({
     if (error) return setToolMessage(error.message);
     closeLoadoutEditor();
     await loadLoadoutStrip();
+    refreshInventoryPanels();
     onSaved();
   }
 
@@ -521,6 +544,7 @@ export default function CharacterSheet({
     if (error) return setToolMessage(error.message);
     closeLoadoutEditor();
     await loadLoadoutStrip();
+    refreshInventoryPanels();
     onSaved();
   }
 
@@ -624,11 +648,19 @@ export default function CharacterSheet({
   const shownAttributes = editing ? form.attributes : applyActiveModifiers(attributes, activeAttributeModifiers);
   const personalPassives = (editing ? form.personal_passives : character.notes ?? '').trim();
   const personalPassiveLines = personalPassives.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const equippedWeapon = equipmentItems.find((item) => typeOfItem(item) === 'weapon') ?? null;
-  const equippedArmor = equipmentItems.find((item) => typeOfItem(item) === 'armor') ?? null;
-  const equippedShield = equipmentItems.find((item) => typeOfItem(item) === 'shield') ?? null;
-  const activePetItem = equipmentItems.find((item) => typeOfItem(item) === 'pet') ?? null;
-  const activeAnimal = properties.find((entry) => entry.property_type === 'animal' && entry.is_active_pet) ?? properties.find((entry) => entry.property_type === 'animal') ?? null;
+  const itemInSlot = (slot: LoadoutSlotKey, fallbackType?: InventoryItemType) =>
+    equipmentItems.find((item) => item.loadout_slot === slot)
+    ?? (fallbackType ? equipmentItems.find((item) => !item.loadout_slot && typeOfItem(item) === fallbackType) : null)
+    ?? null;
+  const equippedWeapon = itemInSlot('weapon', 'weapon');
+  const equippedArmor = itemInSlot('armor', 'armor');
+  const equippedShield = itemInSlot('shield', 'shield');
+  const activePetItem = itemInSlot('pet', 'pet');
+  const accessoryOne = itemInSlot('accessory-1');
+  const accessoryTwo = itemInSlot('accessory-2');
+  const accessoryThree = itemInSlot('accessory-3');
+  const accessoryFour = itemInSlot('accessory-4');
+  const activeAnimal = properties.find((entry) => entry.property_type === 'animal' && entry.is_pet && entry.is_active_pet) ?? null;
 
   function LoadoutSlot({
     label,
@@ -833,7 +865,7 @@ export default function CharacterSheet({
               <select className="field" value={grantForm.item_type} onChange={(event) => setGrantForm({ ...grantForm, item_type: event.target.value as InventoryItemType, legendary_weapon: event.target.value === 'weapon' ? grantForm.legendary_weapon : false })}>
                 {grantItemTypes.map((entry) => <option key={String(entry.value)} value={String(entry.value)}>{entry.label}</option>)}
               </select>
-              <select className="field" value={grantForm.rarity} onChange={(event) => setGrantForm({ ...grantForm, rarity: event.target.value, legendary_weapon: event.target.value === 'Legendary' && String(grantForm.item_type) === 'weapon' ? true : grantForm.legendary_weapon })}>
+              <select className="field" value={grantForm.rarity} onChange={(event) => setGrantForm({ ...grantForm, rarity: event.target.value })}>
                 {rarityOptions.map((rarity) => <option key={rarity} value={rarity}>{rarity}</option>)}
               </select>
               <NumberInput className="field" min={1} value={grantForm.quantity} onValueChange={(quantity) => setGrantForm({ ...grantForm, quantity })} placeholder="Quantity" />
@@ -999,6 +1031,12 @@ export default function CharacterSheet({
           <LoadoutSlot label="Shield" slot="shield" icon={Shield} item={equippedShield} />
           <LoadoutSlot label="Active pet" slot="pet" icon={PawPrint} item={activePetItem} fallbackName={activeAnimal?.custom_name || activeAnimal?.property_name || undefined} />
         </div>
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <LoadoutSlot label="Accessory 1" slot="accessory-1" icon={Sparkles} item={accessoryOne} />
+          <LoadoutSlot label="Accessory 2" slot="accessory-2" icon={Sparkles} item={accessoryTwo} />
+          <LoadoutSlot label="Accessory 3" slot="accessory-3" icon={Sparkles} item={accessoryThree} />
+          <LoadoutSlot label="Accessory 4" slot="accessory-4" icon={Sparkles} item={accessoryFour} />
+        </div>
       </section>
 
       {selectedLoadoutItem && (
@@ -1106,12 +1144,12 @@ export default function CharacterSheet({
       )}
 
       {loadoutDragGhost && (
-        <div className="pointer-events-none fixed z-[100] rounded-xl border border-[var(--brass)] bg-[#1a0d05f2] px-3 py-2 text-xs font-black shadow-2xl" style={{ left: loadoutDragGhost.x + 12, top: loadoutDragGhost.y + 12 }}>
+        <div className={`inventory-drag-ghost pointer-events-none fixed z-[100] rounded-xl border px-3 py-2 text-xs font-black shadow-2xl ${rarityClass(loadoutDragGhost.item.rarity)} ${imbuedSpellName(loadoutDragGhost.item.notes) ? 'inventory-enchanted-outline' : ''}`} style={{ left: loadoutDragGhost.x + 12, top: loadoutDragGhost.y + 12 }}>
           {loadoutDragGhost.item.item_name} ×{loadoutDragGhost.item.quantity}
         </div>
       )}
 
-      <InventoryPanel character={character} canEdit={canEdit} profile={profile} />
+      <InventoryPanel character={character} canEdit={canEdit} profile={profile} refreshSignal={inventoryRefreshSignal} />
       {character.class_key === 'beastmaster' && <TamedBeastsPanel character={character} profile={profile} readOnly={readOnly} />}
       <PropertyPanel character={character} profile={profile} readOnly={readOnly} />
     </div>
