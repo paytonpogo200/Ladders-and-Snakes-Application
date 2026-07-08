@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type PointerEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { Coins, Gift, Heart, PackageOpen, PawPrint, Plus, Save, Shield, Sparkles, Sword, Trash2, UserRound, WandSparkles, X, type LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import InventoryPanel from '@/components/InventoryPanel';
@@ -192,6 +193,7 @@ export default function CharacterSheet({
   const [loadoutBusy, setLoadoutBusy] = useState(false);
   const [loadoutDragGhost, setLoadoutDragGhost] = useState<{ item: InventoryItemWithModifiers; x: number; y: number } | null>(null);
   const [loadoutDraggingItemId, setLoadoutDraggingItemId] = useState<string | null>(null);
+  const [canPortalLoadoutGhost, setCanPortalLoadoutGhost] = useState(false);
   const [inventoryRefreshSignal, setInventoryRefreshSignal] = useState(0);
   const [loadoutForm, setLoadoutForm] = useState({
     item_name: '',
@@ -554,6 +556,10 @@ export default function CharacterSheet({
     refreshInventoryPanels();
     onSaved();
   }
+
+  useEffect(() => {
+    setCanPortalLoadoutGhost(true);
+  }, []);
 
   useEffect(() => {
     function pointerMove(event: globalThis.PointerEvent) {
@@ -1162,10 +1168,11 @@ export default function CharacterSheet({
         </Modal>
       )}
 
-      {loadoutDragGhost && (
+      {canPortalLoadoutGhost && loadoutDragGhost && createPortal(
         <div className={`inventory-drag-ghost pointer-events-none fixed z-[100] rounded-xl border px-3 py-2 text-xs font-black shadow-2xl ${rarityClass(loadoutDragGhost.item.rarity)} ${imbuedSpellName(loadoutDragGhost.item.notes) ? 'inventory-enchanted-outline' : ''}`} style={{ left: loadoutDragGhost.x + 12, top: loadoutDragGhost.y + 12 }}>
-          {loadoutDragGhost.item.item_name} ×{loadoutDragGhost.item.quantity}
-        </div>
+          {loadoutDragGhost.item.item_name} x{loadoutDragGhost.item.quantity}
+        </div>,
+        document.body
       )}
 
       <InventoryPanel character={character} canEdit={canEdit} profile={profile} refreshSignal={inventoryRefreshSignal} externalDragTargetKey={hoveredInventorySlot} />
