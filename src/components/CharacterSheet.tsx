@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type PointerEvent } from 'react';
-import { Coins, Gem, Gift, Heart, PackageOpen, PawPrint, Plus, Save, Shield, Sparkles, Sword, Trash2, UserRound, WandSparkles, X, type LucideIcon } from 'lucide-react';
+import { Coins, Gift, Heart, PackageOpen, PawPrint, Plus, Save, Shield, Sparkles, Sword, Trash2, UserRound, WandSparkles, X, type LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import InventoryPanel from '@/components/InventoryPanel';
 import SpellPanel from '@/components/SpellPanel';
@@ -33,9 +33,10 @@ import {
 const grantItemTypes: { value: InventoryItemType; label: string }[] = [
   { value: 'weapon', label: 'Weapon' },
   { value: 'armor', label: 'Armor' },
-  { value: 'shield', label: 'Shield' },
-  { value: 'pet', label: 'Pet' },
+  { value: 'shield' as InventoryItemType, label: 'Shield' },
+  { value: 'pet' as InventoryItemType, label: 'Pet' },
   { value: 'accessory', label: 'Accessory' },
+  { value: 'storage', label: 'Storage' },
   { value: 'ore', label: 'Ore' },
   { value: 'potion', label: 'Potion' },
   { value: 'food', label: 'Food' },
@@ -45,8 +46,9 @@ const grantItemTypes: { value: InventoryItemType; label: string }[] = [
   { value: 'quest', label: 'Quest' },
   { value: 'misc', label: 'Misc.' }
 ];
+const rarityOptions = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Mythical'];
 
-type LoadoutSlotKey = 'weapon' | 'armor' | 'shield' | 'pet' | 'accessory1' | 'accessory2' | 'accessory3' | 'accessory4';
+type LoadoutSlotKey = 'weapon' | 'armor' | 'shield' | 'pet';
 type AttributeModifierMap = Partial<Record<keyof CharacterAttributes, number>>;
 type ModifierFormState = Record<keyof CharacterAttributes, string>;
 type InventoryItemWithModifiers = InventoryItem & { modifiers?: AttributeModifierMap | null; legendary_display_text?: string | null };
@@ -172,6 +174,7 @@ export default function CharacterSheet({
     name: '',
     quantity: 1,
     item_type: 'misc' as InventoryItemType,
+    rarity: 'Common',
     imbued_spell_id: '',
     storage_capacity: 0,
     legendary_weapon: false,
@@ -212,6 +215,7 @@ export default function CharacterSheet({
       name: '',
       quantity: 1,
       item_type: 'misc',
+      rarity: 'Common',
       imbued_spell_id: '',
       storage_capacity: 0,
       legendary_weapon: false,
@@ -311,7 +315,7 @@ export default function CharacterSheet({
             : '',
           item_type_input: grantForm.item_type,
           storage_capacity_input: Math.max(0, Number(grantForm.storage_capacity) || 0),
-          rarity_input: isLegendaryWeapon ? 'Legendary' : 'Common',
+          rarity_input: isLegendaryWeapon ? 'Legendary' : grantForm.rarity,
           trade_locked_input: false,
           modifiers_input: itemModifiers,
           legendary_display_text_input: isLegendaryWeapon ? grantForm.legendary_display_text.trim() : ''
@@ -336,7 +340,23 @@ export default function CharacterSheet({
       return false;
     }
 
-    setToolMessage(`${slot.startsWith('accessory') ? 'Accessory' : slot === 'pet' ? 'Pet' : slot.charAt(0).toUpperCase() + slot.slice(1)} equipped.`);
+    setToolMessage(`${slot === 'pet' ? 'Pet' : slot.charAt(0).toUpperCase() + slot.slice(1)} equipped.`);
+    await loadLoadoutStrip();
+    onSaved();
+    return true;
+  }
+
+  async function equipPropertyAsPet(propertyId: string) {
+    const { error } = await createClient().rpc('equip_property_as_pet', {
+      target_property_id: propertyId
+    });
+
+    if (error) {
+      setToolMessage(error.message);
+      return false;
+    }
+
+    setToolMessage('Active pet updated.');
     await loadLoadoutStrip();
     onSaved();
     return true;
@@ -345,6 +365,12 @@ export default function CharacterSheet({
   async function equipDroppedItem(slot: LoadoutSlotKey, event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setHoveredLoadoutSlot(null);
+
+    const propertyId = event.dataTransfer.getData('application/x-character-property-id');
+    if (slot === 'pet' && propertyId) {
+      await equipPropertyAsPet(propertyId);
+      return;
+    }
 
     const itemId = event.dataTransfer.getData('application/x-inventory-item-id') || event.dataTransfer.getData('text/plain');
     if (!itemId) return;
@@ -598,19 +624,11 @@ export default function CharacterSheet({
   const shownAttributes = editing ? form.attributes : applyActiveModifiers(attributes, activeAttributeModifiers);
   const personalPassives = (editing ? form.personal_passives : character.notes ?? '').trim();
   const personalPassiveLines = personalPassives.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const loadoutItem = (slot: LoadoutSlotKey, legacyType?: string) =>
-    equipmentItems.find((item) => item.loadout_slot === slot) ?? equipmentItems.find((item) => !item.loadout_slot && legacyType && typeOfItem(item) === legacyType) ?? null;
-  const equippedWeapon = loadoutItem('weapon', 'weapon');
-  const equippedArmor = loadoutItem('armor', 'armor');
-  const equippedShield = loadoutItem('shield', 'shield');
-  const activePetItem = loadoutItem('pet', 'pet');
-  const accessoryItems = [
-    loadoutItem('accessory1', 'accessory'),
-    loadoutItem('accessory2'),
-    loadoutItem('accessory3'),
-    loadoutItem('accessory4')
-  ];
-  const activeAnimal = properties.find((entry) => entry.property_type === 'animal') ?? null;
+  const equippedWeapon = equipmentItems.find((item) => typeOfItem(item) === 'weapon') ?? null;
+  const equippedArmor = equipmentItems.find((item) => typeOfItem(item) === 'armor') ?? null;
+  const equippedShield = equipmentItems.find((item) => typeOfItem(item) === 'shield') ?? null;
+  const activePetItem = equipmentItems.find((item) => typeOfItem(item) === 'pet') ?? null;
+  const activeAnimal = properties.find((entry) => entry.property_type === 'animal' && entry.is_active_pet) ?? properties.find((entry) => entry.property_type === 'animal') ?? null;
 
   function LoadoutSlot({
     label,
@@ -815,6 +833,9 @@ export default function CharacterSheet({
               <select className="field" value={grantForm.item_type} onChange={(event) => setGrantForm({ ...grantForm, item_type: event.target.value as InventoryItemType, legendary_weapon: event.target.value === 'weapon' ? grantForm.legendary_weapon : false })}>
                 {grantItemTypes.map((entry) => <option key={String(entry.value)} value={String(entry.value)}>{entry.label}</option>)}
               </select>
+              <select className="field" value={grantForm.rarity} onChange={(event) => setGrantForm({ ...grantForm, rarity: event.target.value, legendary_weapon: event.target.value === 'Legendary' && String(grantForm.item_type) === 'weapon' ? true : grantForm.legendary_weapon })}>
+                {rarityOptions.map((rarity) => <option key={rarity} value={rarity}>{rarity}</option>)}
+              </select>
               <NumberInput className="field" min={1} value={grantForm.quantity} onValueChange={(quantity) => setGrantForm({ ...grantForm, quantity })} placeholder="Quantity" />
               {String(grantForm.item_type) === 'weapon' && spells.length > 0 && (
                 <select className="field" value={grantForm.imbued_spell_id} onChange={(event) => setGrantForm({ ...grantForm, imbued_spell_id: event.target.value })}>
@@ -977,11 +998,6 @@ export default function CharacterSheet({
           <LoadoutSlot label="Weapon" slot="weapon" icon={Sword} item={equippedWeapon} />
           <LoadoutSlot label="Shield" slot="shield" icon={Shield} item={equippedShield} />
           <LoadoutSlot label="Active pet" slot="pet" icon={PawPrint} item={activePetItem} fallbackName={activeAnimal?.custom_name || activeAnimal?.property_name || undefined} />
-        </div>
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {accessoryItems.map((item, index) => (
-            <LoadoutSlot key={index} label={`Accessory ${index + 1}`} slot={`accessory${index + 1}` as LoadoutSlotKey} icon={Gem} item={item} />
-          ))}
         </div>
       </section>
 

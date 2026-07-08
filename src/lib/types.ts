@@ -1,7 +1,22 @@
 export type UserRole = 'player' | 'dm';
 export type CharacterKind = 'player' | 'enemy' | 'npc';
 export type BattleStatus = 'active' | 'ended';
-export type InventoryItemType = 'weapon' | 'armor' | 'shield' | 'pet' | 'accessory' | 'consumable' | 'ore' | 'potion' | 'food' | 'plant' | 'fabric' | 'tool' | 'quest' | 'misc';
+export type InventoryItemType =
+  | 'weapon'
+  | 'armor'
+  | 'shield'
+  | 'pet'
+  | 'accessory'
+  | 'storage'
+  | 'consumable'
+  | 'ore'
+  | 'potion'
+  | 'food'
+  | 'plant'
+  | 'fabric'
+  | 'tool'
+  | 'quest'
+  | 'misc';
 
 export type ClassAsset = {
   id?: string;
@@ -366,10 +381,9 @@ export type CharacterProperty = {
   property_name: string;
   custom_name: string;
   property_type: 'wagon' | 'animal' | 'property';
+  is_active_pet?: boolean;
   notes: string;
   source_product_id?: string | null;
-  is_at_house?: boolean;
-  house_slot_index?: number | null;
   created_at?: string;
   updated_at?: string;
 };

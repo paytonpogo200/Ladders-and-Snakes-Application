@@ -9,6 +9,7 @@ import { DEFAULT_LOOT_ENTRIES, LOOT_BIOMES, LOOT_ROOM_TYPES } from '@/lib/lootPr
 import { rarityClass } from '@/lib/rarity';
 import { createDebouncedRefresh } from '@/lib/realtime';
 import { readRememberedSelection, rememberSelection } from '@/lib/selectionMemory';
+import { inferItemType, storageCapacityForItem } from '@/lib/itemTyping';
 import type { Character, InventoryItemType, LootEntry, LootGeneratorConfig, LootPoolSize, LootRareRule, LootRollResult, LootRoomRule, Profile } from '@/lib/types';
 
 type ExplorationLootResult = LootRollResult & {
@@ -72,24 +73,8 @@ function slug(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
-function itemType(category: string): InventoryItemType {
-  if (category === 'Weapon') return 'weapon';
-  if (category === 'Clothing') return 'armor';
-  if (['Potion', 'Alchemy', 'Food'].includes(category)) return 'consumable';
-  if (['Tool', 'Storage', 'Gear'].includes(category)) return 'tool';
-  if (['Scroll', 'Tome', 'Lore', 'Upgrade'].includes(category)) return 'quest';
-  return 'misc';
-}
-
 function storageCapacity(name: string) {
-  const capacities: Record<string, number> = {
-    'Waist Pouch': 1,
-    'Back Bag': 3,
-    'Light Duffle': 6,
-    'Heavy Duffle': 10,
-    'Bag of Holding': 100
-  };
-  return capacities[name] ?? 0;
+  return storageCapacityForItem(name);
 }
 
 function textCell(row: Record<string, unknown>, key: string) {
@@ -365,7 +350,7 @@ export default function ExplorationPanel({ profile }: { profile: Profile }) {
           weight,
           min_quantity: Math.trunc(min_quantity),
           max_quantity: Math.trunc(max_quantity),
-          item_type: itemType(category),
+          item_type: inferItemType(item_name, category),
           storage_capacity: storageCapacity(item_name)
         });
       });

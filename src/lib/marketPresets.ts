@@ -1,5 +1,6 @@
 import type { InventoryItemType } from '@/lib/types';
 import { CALOSTRYNN_SPELLS } from '@/lib/spellPresets';
+import { inferItemType } from '@/lib/itemTyping';
 
 export const CALOSTRYNN_CURRENCY = {
   system_key: 'calostrynn',
@@ -60,7 +61,7 @@ const p = (
   product_key,
   name,
   description: '',
-  item_type: 'misc',
+  item_type: inferItemType(name, vendor_keys[0] ?? ''),
   price_base,
   stock_quantity: null,
   storage_capacity: 0,
@@ -71,13 +72,13 @@ const p = (
 });
 
 const marketProducts: SeedProduct[] = [
-  p('waist-pouch', 'Waist Pouch', 8, ['storage'], { item_type: 'tool', storage_capacity: 1, description: 'A small 1-slot storage container.' }),
-  p('back-bag', 'Back Bag', 80, ['storage'], { item_type: 'tool', storage_capacity: 3, description: 'A 3-slot storage container.' }),
-  p('light-duffle', 'Light Duffle', 200, ['storage'], { item_type: 'tool', storage_capacity: 6, description: 'A 6-slot storage container.' }),
-  p('heavy-duffle', 'Heavy Duffle', 500, ['storage'], { item_type: 'tool', storage_capacity: 10, description: 'A 10-slot storage container.' }),
-  p('bag-of-holding', 'Bag of Holding', 2500000, ['storage'], { item_type: 'tool', storage_capacity: 100, description: 'A magical 100-slot storage container.' }),
-  p('light-wagon', 'Light Wagon', 2500, ['storage'], { item_type: 'tool', description: 'A travel wagon. It becomes character property, not carried storage.' }),
-  p('heavy-wagon', 'Heavy Wagon', 6000, ['storage'], { item_type: 'tool', description: 'A heavy travel wagon. It becomes character property, not carried storage.' }),
+  p('waist-pouch', 'Waist Pouch', 8, ['storage'], { item_type: 'storage', storage_capacity: 1, description: 'A small 1-slot storage container.' }),
+  p('back-bag', 'Back Bag', 80, ['storage'], { item_type: 'storage', storage_capacity: 3, description: 'A 3-slot storage container.' }),
+  p('light-duffle', 'Light Duffle', 200, ['storage'], { item_type: 'storage', storage_capacity: 6, description: 'A 6-slot storage container.' }),
+  p('heavy-duffle', 'Heavy Duffle', 500, ['storage'], { item_type: 'storage', storage_capacity: 10, description: 'A 10-slot storage container.' }),
+  p('bag-of-holding', 'Bag of Holding', 2500000, ['storage'], { item_type: 'storage', storage_capacity: 100, description: 'A magical 100-slot storage container.' }),
+  p('light-wagon', 'Light Wagon', 2500, ['storage'], { item_type: 'storage', description: 'A travel wagon. It becomes character property, not carried storage.' }),
+  p('heavy-wagon', 'Heavy Wagon', 6000, ['storage'], { item_type: 'storage', description: 'A heavy travel wagon. It becomes character property, not carried storage.' }),
   ...[
     ['torches', 'Torches', 3], ['rope', 'Rope', 10], ['blankets', 'Blankets', 8], ['cooking-pots', 'Cooking Pots', 10],
     ['cloth', 'Cloth', 2], ['fine-cloth', 'Fine Cloth', 50], ['ink-paper', 'Ink and Paper', 5], ['lock', 'Lock', 20],

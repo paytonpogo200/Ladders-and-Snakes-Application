@@ -1,13 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Home, LogIn, LogOut, PackageOpen, PawPrint, Trash2, Truck } from 'lucide-react';
+import { Home, LogIn, LogOut, PackageOpen, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import NumberInput from '@/components/NumberInput';
 import { rarityClass } from '@/lib/rarity';
 import { createDebouncedRefresh } from '@/lib/realtime';
 import { readRememberedSelection, rememberSelection } from '@/lib/selectionMemory';
-import type { Character, CharacterProperty, HouseInventoryItem, InventoryItem, PlayerHouse, Profile } from '@/lib/types';
+import type { Character, HouseInventoryItem, InventoryItem, PlayerHouse, Profile } from '@/lib/types';
 
 export default function HousePanel({
   profile,
@@ -21,7 +21,6 @@ export default function HousePanel({
   const supabase = useMemo(() => createClient(), []);
   const [house, setHouse] = useState<PlayerHouse | null>(null);
   const [houseItems, setHouseItems] = useState<HouseInventoryItem[]>([]);
-  const [houseProperties, setHouseProperties] = useState<CharacterProperty[]>([]);
   const [carriedItems, setCarriedItems] = useState<InventoryItem[]>([]);
   const [sourceItemId, setSourceItemId] = useState('');
   const [selectedHouseItemId, setSelectedHouseItemId] = useState('');
@@ -47,13 +46,10 @@ export default function HousePanel({
     setHouse(loadedHouse);
 
     const characterIds = characters.map((entry) => entry.id);
-    const [houseResult, inventoryResult, propertyResult] = await Promise.all([
+    const [houseResult, inventoryResult] = await Promise.all([
       supabase.from('house_inventory_items').select('*').eq('house_id', loadedHouse.id).order('slot_index'),
       characterIds.length > 0
         ? supabase.from('inventory_items').select('*').in('character_id', characterIds).order('item_name')
-        : Promise.resolve({ data: [], error: null }),
-      characterIds.length > 0
-        ? supabase.from('character_properties').select('*').in('character_id', characterIds).eq('is_at_house', true).order('house_slot_index')
         : Promise.resolve({ data: [], error: null })
     ]);
     if (!houseResult.error) {
@@ -66,7 +62,6 @@ export default function HousePanel({
       setCarriedItems(loaded);
       if (!sourceItemId && loaded[0]) setSourceItemId(loaded[0].id);
     }
-    if (!propertyResult.error) setHouseProperties((propertyResult.data ?? []) as CharacterProperty[]);
   }
 
   useEffect(() => {
@@ -81,7 +76,6 @@ export default function HousePanel({
     const channel = supabase
       .channel(`house-${house.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'house_inventory_items', filter: `house_id=eq.${house.id}` }, refreshHouse)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'character_properties' }, refreshHouse)
       .subscribe();
     return () => {
       refreshHouse.cancel();
@@ -195,23 +189,6 @@ export default function HousePanel({
         <span className="text-xs font-black text-[var(--muted)]">{houseItems.length}/{house.capacity}</span>
       </summary>
       <div className="border-t border-[#e0a64e22] p-3">
-        <section className="mb-4 rounded-xl border border-[#63b5a533] bg-[#63b5a50b] p-3">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <p className="text-[10px] font-black uppercase tracking-wider text-[var(--teal)]">Property stalls</p>
-            <span className="text-xs font-black text-[var(--muted)]">{houseProperties.length}/10</span>
-          </div>
-          <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-10">
-            {Array.from({ length: 10 }, (_, slot) => {
-              const property = houseProperties.find((entry) => entry.house_slot_index === slot);
-              return (
-                <div key={slot} className={`relative flex aspect-square min-h-12 flex-col items-center justify-center rounded-lg border p-1.5 text-center ${property ? 'border-[#63b5a555] bg-[#63b5a512]' : 'border-dashed border-[var(--line)] bg-black/10'}`}>
-                  <span className="absolute right-1 top-0.5 text-[7px] text-[var(--muted)]">{slot + 1}</span>
-                  {property && <><span className="text-[var(--teal)]">{property.property_type === 'wagon' ? <Truck size={13} /> : <PawPrint size={13} />}</span><span className="mt-1 block truncate text-[8px] font-black">{property.custom_name || property.property_name}</span></>}
-                </div>
-              );
-            })}
-          </div>
-        </section>
         <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-10">
           {Array.from({ length: house.capacity }, (_, slot) => {
             const item = houseItems.find((entry) => entry.slot_index === slot);
