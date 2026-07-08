@@ -196,6 +196,7 @@ export default function CharacterSheet({
     item_name: '',
     quantity: 1,
     item_type: 'misc' as InventoryItemType,
+    rarity: 'Common',
     imbued_spell_id: '',
     equipped: true,
     storage_capacity: 0,
@@ -470,6 +471,7 @@ export default function CharacterSheet({
       item_name: item.item_name,
       quantity: item.quantity,
       item_type: item.item_type,
+      rarity: item.rarity ?? 'Common',
       imbued_spell_id: matchedSpell?.id ?? '',
       equipped: item.equipped,
       storage_capacity: item.storage_capacity ?? 0,
@@ -502,7 +504,7 @@ export default function CharacterSheet({
           ? legendaryNotes(loadoutForm.legendary_description, spellName)
           : imbueNotes(spellName)
         : '',
-      rarity: isLegendaryWeapon ? 'Legendary' : (selectedLoadoutItem.rarity ?? 'Common'),
+      rarity: isLegendaryWeapon ? 'Legendary' : (loadoutForm.rarity || 'Common'),
       legendary_display_text: isLegendaryWeapon ? loadoutForm.legendary_display_text.trim() : '',
       equipped: true,
       modifiers: loadoutForm.modifiers_enabled ? cleanModifierInput(loadoutForm.modifiers) : {}
@@ -1067,6 +1069,12 @@ export default function CharacterSheet({
               <label>
                 <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Quantity</span>
                 <NumberInput className="field" min={1} value={loadoutForm.quantity} onValueChange={(quantity) => setLoadoutForm({ ...loadoutForm, quantity })} disabled={!canEdit} />
+              </label>
+              <label>
+                <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Rarity</span>
+                <select className="field" value={loadoutForm.rarity} onChange={(event) => setLoadoutForm({ ...loadoutForm, rarity: event.target.value })} disabled={!canEdit}>
+                  {rarityOptions.map((rarity) => <option key={rarity} value={rarity}>{rarity}</option>)}
+                </select>
               </label>
 
               {String(loadoutForm.item_type) === 'weapon' && spells.length > 0 && (
