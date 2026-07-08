@@ -9,6 +9,7 @@ import { rarityClass } from '@/lib/rarity';
 import { createDebouncedRefresh } from '@/lib/realtime';
 import { ITEM_CATALOG, type ItemCatalogEntry } from '@/lib/itemCatalog';
 import { storageCapacityForItem } from '@/lib/itemTyping';
+import { GLASS_FLASK_CATALOG_ITEM, isPotionItem, potionEffect } from '@/lib/itemCatalogTools';
 import { ATTRIBUTE_KEYS, ATTRIBUTE_LABELS, type Character, type CharacterAttributes, type CharacterTransferCapacity, type InventoryItem, type InventoryItemType, type Profile, type Spell } from '@/lib/types';
 
 const itemTypes: { value: InventoryItemType; label: string; icon: LucideIcon }[] = [
@@ -100,7 +101,7 @@ function ItemIcon({ type, size = 19 }: { type: InventoryItemType; size?: number 
   return <Icon size={size} />;
 }
 
-export default function InventoryPanel({ character, canEdit, profile, refreshSignal = 0, externalDragTargetKey = null }: { character: Character; canEdit: boolean; profile: Profile; refreshSignal?: number; externalDragTargetKey?: string | null }) {
+export default function InventoryPanel({ character, canEdit, profile, refreshSignal = 0, externalDragTargetKey = null, onCharacterChanged }: { character: Character; canEdit: boolean; profile: Profile; refreshSignal?: number; externalDragTargetKey?: string | null; onCharacterChanged?: () => void }) {
   const supabase = useMemo(() => createClient(), []);
   const [items, setItems] = useState<InventoryItemWithLock[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -488,6 +489,99 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
     await loadItems();
   }
 
+  async function addGlassFlaskAfterUse(consumedItem: InventoryItemWithLock) {
+    const existingFlasks = items.find((item) =>
+      item.id !== consumedItem.id
+      && item.parent_item_id === null
+      && !item.equipped
+      && !item.is_storage
+      && item.item_name.trim().toLowerCase() === GLASS_FLASK_CATALOG_ITEM.name.toLowerCase()
+    );
+    if (existingFlasks) {
+      const { error } = await supabase
+        .from('inventory_items')
+        .update({ quantity: existingFlasks.quantity + 1, rarity: GLASS_FLASK_CATALOG_ITEM.rarity, item_type: GLASS_FLASK_CATALOG_ITEM.item_type })
+        .eq('id', existingFlasks.id);
+      return error;
+    }
+
+    const occupied = new Set(
+      items
+        .filter((item) => item.parent_item_id === null && !item.equipped && !item.is_storage && (item.id !== consumedItem.id || consumedItem.quantity > 1))
+        .map((item) => item.slot_index)
+    );
+    const freeSlot = Array.from({ length: slotCount }, (_, index) => index).find((slot) => !occupied.has(slot));
+    if (freeSlot === undefined) {
+      const proceed = window.confirm('No room for the empty glass flask. It will be dropped if you consume this potion. Proceed?');
+      return proceed ? null : new Error('Potion use cancelled.');
+    }
+
+    const { error } = await supabase.from('inventory_items').insert({
+      character_id: character.id,
+      item_name: GLASS_FLASK_CATALOG_ITEM.name,
+      quantity: 1,
+      notes: '',
+      item_type: GLASS_FLASK_CATALOG_ITEM.item_type,
+      rarity: GLASS_FLASK_CATALOG_ITEM.rarity,
+      slot_index: freeSlot,
+      parent_item_id: null,
+      is_storage: false,
+      storage_capacity: 0,
+      equipped: false
+    });
+    return error;
+  }
+
+  async function consumePotion() {
+    if (!selectedItem || !mayManage || !isPotionItem(selectedItem.item_type, selectedItem.item_name)) return;
+    setBusy(true);
+    setMessage('');
+
+    const effect = potionEffect(selectedItem.item_name);
+    if (effect?.kind === 'hp' && character.current_hp >= character.max_hp) {
+      setBusy(false);
+      setMessage(`${character.name}'s Health is already full.`);
+      return;
+    }
+    if (effect?.kind === 'mana' && character.current_mana >= character.max_mana) {
+      setBusy(false);
+      setMessage(`${character.name}'s Mana is already full.`);
+      return;
+    }
+
+    const flaskError = await addGlassFlaskAfterUse(selectedItem);
+    if (flaskError) {
+      setBusy(false);
+      setMessage(flaskError.message);
+      return;
+    }
+
+    if (effect) {
+      const nextStats = effect.kind === 'hp'
+        ? { current_hp: Math.min(character.max_hp, character.current_hp + effect.amount) }
+        : { current_mana: Math.min(character.max_mana, character.current_mana + effect.amount) };
+      const { error: characterError } = await supabase.from('characters').update(nextStats).eq('id', character.id);
+      if (characterError) {
+        setBusy(false);
+        setMessage(characterError.message);
+        return;
+      }
+      await supabase.from('combatants').update(nextStats).eq('character_id', character.id);
+    }
+
+    const itemResult = selectedItem.quantity > 1
+      ? await supabase.from('inventory_items').update({ quantity: selectedItem.quantity - 1 }).eq('id', selectedItem.id)
+      : await supabase.from('inventory_items').delete().eq('id', selectedItem.id);
+
+    setBusy(false);
+    if (itemResult.error) return setMessage(itemResult.error.message);
+    const restoreText = effect ? ` ${effect.kind === 'hp' ? 'Restored Health' : 'Restored Mana'} by ${effect.amount}.` : '';
+    setMessage(`${selectedItem.item_name} consumed.${restoreText} Empty glass flask recovered.`);
+    closeEditor();
+    await loadItems();
+    onCharacterChanged?.();
+  }
+
   function renderSlot(item: InventoryItemWithLock | undefined, slot: number, parentId: string | null) {
     const key = slotKey(slot, parentId);
     const spellName = item ? imbuedSpellName(item.notes) : '';
@@ -753,6 +847,7 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
             {action === 'inspect' && (
               <div className="mt-4 flex flex-wrap gap-2">
                 {selectedItem && mayManage && <button type="button" onClick={() => { setAction('drop'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#d76a6255] px-4 py-3 text-sm font-black text-[var(--red)]"><Trash2 size={16} /> Drop</button>}
+                {selectedItem && mayManage && isPotionItem(selectedItem.item_type, selectedItem.item_name) && <button type="button" onClick={consumePotion} disabled={busy} className="flex items-center gap-2 rounded-xl border border-[#63b5a555] px-4 py-3 text-sm font-black text-[var(--teal)] disabled:opacity-40"><FlaskConical size={16} /> Consume</button>}
                 {selectedItem && mayManage && characters.length > 0 && !selectedItem.is_trade_locked && <button type="button" onClick={() => { setAction('give'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#9caf7955] px-4 py-3 text-sm font-black text-[var(--teal)]"><Send size={16} /> Give</button>}
                 {selectedItem && mayManage && selectedItem.is_trade_locked && <span className="flex items-center gap-2 rounded-xl border border-[#d1a85b55] px-4 py-3 text-sm font-black text-[var(--brass)]">Unique · cannot trade</span>}
                 {selectedItem && mayManage && <button type="button" onClick={() => { setAction('house'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#e0a64e55] px-4 py-3 text-sm font-black text-[var(--brass)]"><Home size={16} /> House</button>}

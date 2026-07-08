@@ -445,6 +445,7 @@ export default function BattleRoom({ profile }: { profile: Profile }) {
               character={{ ...selectedCombatant.characters, current_hp: selectedCombatant.current_hp, current_mana: selectedCombatant.current_mana }}
               canEdit={false}
               profile={profile}
+              onCharacterChanged={loadBattle}
             />
           </div>
         </section>

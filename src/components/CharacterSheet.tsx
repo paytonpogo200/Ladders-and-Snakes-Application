@@ -1175,7 +1175,7 @@ export default function CharacterSheet({
         document.body
       )}
 
-      <InventoryPanel character={character} canEdit={canEdit} profile={profile} refreshSignal={inventoryRefreshSignal} externalDragTargetKey={hoveredInventorySlot} />
+      <InventoryPanel character={character} canEdit={canEdit} profile={profile} refreshSignal={inventoryRefreshSignal} externalDragTargetKey={hoveredInventorySlot} onCharacterChanged={onSaved} />
       {character.class_key === 'beastmaster' && <TamedBeastsPanel character={character} profile={profile} readOnly={readOnly} />}
       <PropertyPanel character={character} profile={profile} readOnly={readOnly} />
     </div>
