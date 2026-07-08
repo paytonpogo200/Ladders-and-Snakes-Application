@@ -9,6 +9,29 @@ import { createDebouncedRefresh } from '@/lib/realtime';
 import { readRememberedSelection, rememberSelection } from '@/lib/selectionMemory';
 import type { Character, HouseInventoryItem, InventoryItem, PlayerHouse, Profile } from '@/lib/types';
 
+function normalizeStackName(value?: string | null) {
+  return String(value ?? '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function normalizeStackRarity(value?: string | null) {
+  return String(value || 'Common').toLowerCase().trim();
+}
+
+function houseItemSpecialSignature(item: HouseInventoryItem) {
+  return JSON.stringify({
+    notes: String(item.notes ?? '').trim(),
+    storage_capacity: Number(item.storage_capacity ?? 0)
+  });
+}
+
+function canStackHouseItems(source: HouseInventoryItem, target: HouseInventoryItem) {
+  if (source.id === target.id) return false;
+  if (source.is_storage || target.is_storage) return false;
+  return normalizeStackName(source.item_name) === normalizeStackName(target.item_name)
+    && normalizeStackRarity(source.rarity) === normalizeStackRarity(target.rarity)
+    && houseItemSpecialSignature(source) === houseItemSpecialSignature(target);
+}
+
 export default function HousePanel({
   profile,
   ownerUserId,
@@ -142,12 +165,37 @@ export default function HousePanel({
 
   async function moveHouseItem(item: HouseInventoryItem, slot: number) {
     setMessage('');
+    const stacked = await stackHouseItemIntoSlot(item, slot);
+    if (stacked) return;
     const { error } = await supabase.rpc('move_house_item_slot', {
       target_house_item_id: item.id,
       target_slot_index: slot
     });
     if (error) setMessage(error.message);
     await loadHouse();
+  }
+
+  async function stackHouseItemIntoSlot(item: HouseInventoryItem, slot: number) {
+    const target = houseItems.find((entry) => entry.slot_index === slot && !entry.is_storage);
+    if (!target || !canStackHouseItems(item, target)) return false;
+
+    const targetQuantity = Math.max(1, Number(target.quantity) || 1);
+    const itemQuantity = Math.max(1, Number(item.quantity) || 1);
+    const patch: Partial<HouseInventoryItem> = { quantity: targetQuantity + itemQuantity };
+    if (target.item_type === 'misc' && item.item_type !== 'misc') patch.item_type = item.item_type;
+
+    const { error: updateError } = await supabase.from('house_inventory_items').update(patch).eq('id', target.id);
+    if (updateError) {
+      setMessage(updateError.message);
+      await loadHouse();
+      return true;
+    }
+
+    const { error: deleteError } = await supabase.from('house_inventory_items').delete().eq('id', item.id);
+    if (deleteError) setMessage(deleteError.message);
+    else setMessage(`${target.item_name} stacked to ×${targetQuantity + itemQuantity}.`);
+    await loadHouse();
+    return true;
   }
 
   function beginHouseDrag(item: HouseInventoryItem, event: React.PointerEvent<HTMLButtonElement>) {

@@ -96,6 +96,31 @@ function itemTypeValue(item: InventoryItem | { item_type: InventoryItemType } | 
   return String(item?.item_type ?? '');
 }
 
+function normalizeStackName(value?: string | null) {
+  return String(value ?? '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function normalizeStackRarity(value?: string | null) {
+  return String(value || 'Common').toLowerCase().trim();
+}
+
+function stableSpecialSignature(item: InventoryItemWithLock) {
+  return JSON.stringify({
+    notes: String(item.notes ?? '').trim(),
+    modifiers: item.modifiers ?? null,
+    legendary_display_text: String(item.legendary_display_text ?? '').trim(),
+    storage_capacity: Number(item.storage_capacity ?? 0)
+  });
+}
+
+function canStackItems(source: InventoryItemWithLock, target: InventoryItemWithLock) {
+  if (source.id === target.id) return false;
+  if (source.is_storage || target.is_storage) return false;
+  return normalizeStackName(source.item_name) === normalizeStackName(target.item_name)
+    && normalizeStackRarity(source.rarity) === normalizeStackRarity(target.rarity)
+    && stableSpecialSignature(source) === stableSpecialSignature(target);
+}
+
 function ItemIcon({ type, size = 19 }: { type: InventoryItemType; size?: number }) {
   const Icon = itemTypes.find((entry) => String(entry.value) === String(type))?.icon ?? legacyItemTypes.find((entry) => entry.value === type)?.icon ?? Box;
   return <Icon size={size} />;
@@ -317,6 +342,8 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
 
   async function moveItem(item: InventoryItemWithLock, slot: number, parentId: string | null) {
     setMessage('');
+    const stacked = await stackItemIntoSlot(item, slot, parentId);
+    if (stacked) return;
     const { error } = await supabase.rpc('move_inventory_item_slot', {
       target_item_id: item.id,
       target_parent_item_id: parentId,
@@ -324,6 +351,34 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
     });
     if (error) setMessage(error.message);
     await loadItems();
+  }
+
+  async function stackItemIntoSlot(item: InventoryItemWithLock, slot: number, parentId: string | null) {
+    const target = items.find((entry) => (
+      entry.slot_index === slot
+      && entry.parent_item_id === parentId
+      && !entry.equipped
+      && !entry.is_storage
+    ));
+    if (!target || !canStackItems(item, target)) return false;
+
+    const targetQuantity = Math.max(1, Number(target.quantity) || 1);
+    const itemQuantity = Math.max(1, Number(item.quantity) || 1);
+    const patch: Partial<InventoryItemWithLock> = { quantity: targetQuantity + itemQuantity };
+    if (target.item_type === 'misc' && item.item_type !== 'misc') patch.item_type = item.item_type;
+
+    const { error: updateError } = await supabase.from('inventory_items').update(patch).eq('id', target.id);
+    if (updateError) {
+      setMessage(updateError.message);
+      await loadItems();
+      return true;
+    }
+
+    const { error: deleteError } = await supabase.from('inventory_items').delete().eq('id', item.id);
+    if (deleteError) setMessage(deleteError.message);
+    else setMessage(`${target.item_name} stacked to ×${targetQuantity + itemQuantity}.`);
+    await loadItems();
+    return true;
   }
 
   async function unequipItem(itemId: string) {
@@ -338,6 +393,14 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
     const fromLoadout = event.dataTransfer.getData('application/x-loadout-source') === 'true';
     if (fromLoadout) {
       event.preventDefault();
+      const dragged = items.find((entry) => entry.id === itemId);
+      if (dragged) {
+        const stacked = await stackItemIntoSlot(dragged, slot, parentId);
+        if (stacked) {
+          setDragTargetKey(null);
+          return;
+        }
+      }
       const { error: moveError } = await supabase.rpc('move_inventory_item_slot', {
         target_item_id: itemId,
         target_parent_item_id: parentId,
