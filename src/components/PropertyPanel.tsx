@@ -64,6 +64,22 @@ export default function PropertyPanel({ character, profile, readOnly = false }: 
     }
   }
 
+  async function toggleAtHouse(property: CharacterProperty) {
+    if (!mayEdit) return;
+    setSavingId(property.id);
+    setMessage('');
+    const { error } = await supabase.rpc('set_property_house_status', {
+      target_property_id: property.id,
+      should_be_home: !property.is_at_house
+    });
+    setSavingId(null);
+    if (error) setMessage(error.message);
+    else {
+      setMessage(property.is_at_house ? 'Property is traveling again.' : 'Property left at the house.');
+      await loadProperties();
+    }
+  }
+
   if (properties.length === 0) return null;
 
   return (
@@ -94,8 +110,19 @@ export default function PropertyPanel({ character, profile, readOnly = false }: 
                   <h5 className="truncate text-lg font-black">{property.custom_name || property.property_name}</h5>
                 )}
                 <p className="mt-1 text-xs text-[var(--muted)]">{property.property_name}</p>
+                {property.is_at_house && <p className="mt-2 rounded-lg border border-[#63b5a544] bg-[#63b5a512] px-2 py-1 text-[10px] font-black uppercase tracking-wider text-[var(--teal)]">At house · stall {(property.house_slot_index ?? 0) + 1}</p>}
               </div>
             </div>
+            {mayEdit && ['animal', 'wagon'].includes(property.property_type) && (
+              <button
+                type="button"
+                onClick={() => toggleAtHouse(property)}
+                disabled={savingId === property.id}
+                className="mt-3 w-full rounded-xl border border-[var(--line)] px-3 py-2 text-xs font-black text-[var(--muted)] disabled:opacity-45"
+              >
+                {property.is_at_house ? 'Bring along' : 'Leave at house'}
+              </button>
+            )}
           </article>
         ))}
       </div>

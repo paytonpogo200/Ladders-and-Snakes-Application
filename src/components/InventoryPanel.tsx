@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent, type DragEvent } from 'react';
-import { AlertTriangle, Apple, Box, Check, ChevronDown, FlaskConical, Home, Leaf, PackageOpen, PawPrint, Pickaxe, Plus, ScrollText, Send, Shield, Shirt, Sword, Trash2, Wrench, X, type LucideIcon } from 'lucide-react';
+import { AlertTriangle, Apple, Box, Check, ChevronDown, FlaskConical, Gem, Home, Leaf, PackageOpen, PawPrint, Pickaxe, Plus, ScrollText, Send, Shield, Shirt, Sword, Trash2, Wrench, X, type LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import NumberInput from '@/components/NumberInput';
 import Modal from '@/components/Modal';
@@ -12,8 +12,9 @@ import { ATTRIBUTE_KEYS, ATTRIBUTE_LABELS, type Character, type CharacterAttribu
 const itemTypes: { value: InventoryItemType; label: string; icon: LucideIcon }[] = [
   { value: 'weapon', label: 'Weapon', icon: Sword },
   { value: 'armor', label: 'Armor', icon: Shield },
-  { value: 'shield' as InventoryItemType, label: 'Shield', icon: Shield },
-  { value: 'pet' as InventoryItemType, label: 'Pet', icon: PawPrint },
+  { value: 'shield', label: 'Shield', icon: Shield },
+  { value: 'pet', label: 'Pet', icon: PawPrint },
+  { value: 'accessory', label: 'Accessory', icon: Gem },
   { value: 'ore', label: 'Ore', icon: Pickaxe },
   { value: 'potion', label: 'Potion', icon: FlaskConical },
   { value: 'food', label: 'Food', icon: Apple },
@@ -100,7 +101,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
   const [items, setItems] = useState<InventoryItemWithLock[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [emptyTarget, setEmptyTarget] = useState<{ slot: number; parentId: string | null } | null>(null);
-  const [action, setAction] = useState<'inspect' | 'drop' | 'give' | 'house'>('inspect');
+  const [action, setAction] = useState<'inspect' | 'drop' | 'give' | 'house' | 'consume'>('inspect');
   const [message, setMessage] = useState('');
   const [characters, setCharacters] = useState<Character[]>([]);
   const [capacities, setCapacities] = useState<CharacterTransferCapacity[]>([]);
@@ -135,8 +136,9 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
 
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null;
   const slotCount = Math.max(0, Math.min(100, character.inventory_slots ?? 20));
-  const mainItems = items.filter((item) => item.parent_item_id === null && !item.is_storage);
-  const storageItems = items.filter((item) => item.is_storage);
+  const carriedItems = items.filter((item) => !item.equipped);
+  const mainItems = carriedItems.filter((item) => item.parent_item_id === null && !item.is_storage);
+  const storageItems = carriedItems.filter((item) => item.is_storage);
   const mayManage = profile.role === 'dm' || character.owner_user_id === profile.id;
   const targetCapacity = capacities.find((entry) => entry.character_id === transferTargetId)?.free_slots ?? 0;
 
@@ -437,6 +439,28 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
     await loadItems();
   }
 
+  function potionEffect(item: InventoryItemWithLock) {
+    const sourceText = `${item.item_name} ${item.notes ?? ''}`;
+    const lower = sourceText.toLowerCase();
+    const amount = Number((sourceText.match(/\+(\d+)\s*(health|hp|mana)/i) ?? [])[1] ?? 0);
+    if (/healing|health|\bhp\b/.test(lower)) return { kind: 'hp' as const, amount };
+    if (/mana/.test(lower) && !/mana regen/.test(lower)) return { kind: 'mana' as const, amount };
+    return null;
+  }
+
+  async function consumePotion() {
+    if (!selectedItem || itemTypeValue(selectedItem) !== 'potion') return;
+    const effect = potionEffect(selectedItem);
+    if (effect?.kind === 'hp' && character.current_hp >= character.max_hp) return setMessage('Health is already full.');
+    if (effect?.kind === 'mana' && character.current_mana >= character.max_mana) return setMessage('Mana is already full.');
+    setBusy(true);
+    const { error } = await supabase.rpc('consume_inventory_potion', { target_item_id: selectedItem.id });
+    setBusy(false);
+    if (error) return setMessage(error.message);
+    closeEditor();
+    await loadItems();
+  }
+
   function renderSlot(item: InventoryItemWithLock | undefined, slot: number, parentId: string | null) {
     const key = slotKey(slot, parentId);
     const spellName = item ? imbuedSpellName(item.notes) : '';
@@ -628,7 +652,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
             {selectedItem && action !== 'inspect' && (
               <div className="rounded-xl border border-[var(--line)] bg-black/15 p-3">
                 <div className="mb-3 flex items-center justify-between gap-3">
-                  <h4 className="font-black">{action === 'drop' ? 'Drop item' : action === 'give' ? 'Give item' : 'Send to house'}</h4>
+                  <h4 className="font-black">{action === 'drop' ? 'Drop item' : action === 'give' ? 'Give item' : action === 'house' ? 'Send to house' : 'Consume potion'}</h4>
                   <button type="button" onClick={() => setAction('inspect')} className="rounded-lg border border-[var(--line)] p-1.5"><X size={14} /></button>
                 </div>
                 {action === 'give' && (
@@ -649,11 +673,11 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
                 {action === 'give' && !selectedItem.is_storage && targetCapacity <= 0 && <p className="mt-2 flex items-center gap-2 text-xs text-[var(--red)]"><AlertTriangle size={14} /> That character’s inventory is full.</p>}
                 <button
                   type="button"
-                  onClick={action === 'drop' ? dropItem : action === 'give' ? requestTransfer : sendToHouse}
+                  onClick={action === 'drop' ? dropItem : action === 'give' ? requestTransfer : action === 'house' ? sendToHouse : consumePotion}
                   disabled={busy || (action === 'give' && !selectedItem.is_storage && targetCapacity <= 0)}
                   className="primary-button mt-3 w-full rounded-xl px-4 py-3 text-sm font-black disabled:opacity-40"
                 >
-                  {busy ? 'Working...' : action === 'drop' ? `Drop ${Math.max(1, actionQuantity)}` : action === 'give' ? `Send ${Math.max(1, actionQuantity)}` : `Store ${Math.max(1, actionQuantity)}`}
+                  {busy ? 'Working...' : action === 'drop' ? `Drop ${Math.max(1, actionQuantity)}` : action === 'give' ? `Send ${Math.max(1, actionQuantity)}` : action === 'house' ? `Store ${Math.max(1, actionQuantity)}` : 'Drink potion'}
                 </button>
               </div>
             )}
@@ -666,6 +690,7 @@ export default function InventoryPanel({ character, canEdit, profile }: { charac
                 {selectedItem && mayManage && characters.length > 0 && !selectedItem.is_trade_locked && <button type="button" onClick={() => { setAction('give'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#9caf7955] px-4 py-3 text-sm font-black text-[var(--teal)]"><Send size={16} /> Give</button>}
                 {selectedItem && mayManage && selectedItem.is_trade_locked && <span className="flex items-center gap-2 rounded-xl border border-[#d1a85b55] px-4 py-3 text-sm font-black text-[var(--brass)]">Unique · cannot trade</span>}
                 {selectedItem && mayManage && <button type="button" onClick={() => { setAction('house'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#e0a64e55] px-4 py-3 text-sm font-black text-[var(--brass)]"><Home size={16} /> House</button>}
+                {selectedItem && mayManage && itemTypeValue(selectedItem) === 'potion' && <button type="button" onClick={() => { setAction('consume'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#63b5a555] px-4 py-3 text-sm font-black text-[var(--teal)]"><FlaskConical size={16} /> Consume</button>}
                 {canEdit && <button type="submit" disabled={busy || !form.item_name.trim()} className="primary-button ml-auto rounded-xl px-4 py-3 text-sm font-black disabled:opacity-40">{selectedItem ? 'Save item' : 'Add item'}</button>}
               </div>
             )}

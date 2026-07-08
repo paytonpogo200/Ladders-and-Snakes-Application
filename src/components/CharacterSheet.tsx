@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type PointerEvent } from 'react';
-import { Coins, Gift, Heart, PackageOpen, PawPrint, Plus, Save, Shield, Sparkles, Sword, Trash2, UserRound, WandSparkles, X, type LucideIcon } from 'lucide-react';
+import { Coins, Gem, Gift, Heart, PackageOpen, PawPrint, Plus, Save, Shield, Sparkles, Sword, Trash2, UserRound, WandSparkles, X, type LucideIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import InventoryPanel from '@/components/InventoryPanel';
 import SpellPanel from '@/components/SpellPanel';
@@ -33,8 +33,9 @@ import {
 const grantItemTypes: { value: InventoryItemType; label: string }[] = [
   { value: 'weapon', label: 'Weapon' },
   { value: 'armor', label: 'Armor' },
-  { value: 'shield' as InventoryItemType, label: 'Shield' },
-  { value: 'pet' as InventoryItemType, label: 'Pet' },
+  { value: 'shield', label: 'Shield' },
+  { value: 'pet', label: 'Pet' },
+  { value: 'accessory', label: 'Accessory' },
   { value: 'ore', label: 'Ore' },
   { value: 'potion', label: 'Potion' },
   { value: 'food', label: 'Food' },
@@ -45,7 +46,7 @@ const grantItemTypes: { value: InventoryItemType; label: string }[] = [
   { value: 'misc', label: 'Misc.' }
 ];
 
-type LoadoutSlotKey = 'weapon' | 'armor' | 'shield' | 'pet';
+type LoadoutSlotKey = 'weapon' | 'armor' | 'shield' | 'pet' | 'accessory1' | 'accessory2' | 'accessory3' | 'accessory4';
 type AttributeModifierMap = Partial<Record<keyof CharacterAttributes, number>>;
 type ModifierFormState = Record<keyof CharacterAttributes, string>;
 type InventoryItemWithModifiers = InventoryItem & { modifiers?: AttributeModifierMap | null; legendary_display_text?: string | null };
@@ -335,7 +336,7 @@ export default function CharacterSheet({
       return false;
     }
 
-    setToolMessage(`${slot === 'pet' ? 'Pet' : slot.charAt(0).toUpperCase() + slot.slice(1)} equipped.`);
+    setToolMessage(`${slot.startsWith('accessory') ? 'Accessory' : slot === 'pet' ? 'Pet' : slot.charAt(0).toUpperCase() + slot.slice(1)} equipped.`);
     await loadLoadoutStrip();
     onSaved();
     return true;
@@ -597,10 +598,18 @@ export default function CharacterSheet({
   const shownAttributes = editing ? form.attributes : applyActiveModifiers(attributes, activeAttributeModifiers);
   const personalPassives = (editing ? form.personal_passives : character.notes ?? '').trim();
   const personalPassiveLines = personalPassives.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const equippedWeapon = equipmentItems.find((item) => typeOfItem(item) === 'weapon') ?? null;
-  const equippedArmor = equipmentItems.find((item) => typeOfItem(item) === 'armor') ?? null;
-  const equippedShield = equipmentItems.find((item) => typeOfItem(item) === 'shield') ?? null;
-  const activePetItem = equipmentItems.find((item) => typeOfItem(item) === 'pet') ?? null;
+  const loadoutItem = (slot: LoadoutSlotKey, legacyType?: string) =>
+    equipmentItems.find((item) => item.loadout_slot === slot) ?? equipmentItems.find((item) => !item.loadout_slot && legacyType && typeOfItem(item) === legacyType) ?? null;
+  const equippedWeapon = loadoutItem('weapon', 'weapon');
+  const equippedArmor = loadoutItem('armor', 'armor');
+  const equippedShield = loadoutItem('shield', 'shield');
+  const activePetItem = loadoutItem('pet', 'pet');
+  const accessoryItems = [
+    loadoutItem('accessory1', 'accessory'),
+    loadoutItem('accessory2'),
+    loadoutItem('accessory3'),
+    loadoutItem('accessory4')
+  ];
   const activeAnimal = properties.find((entry) => entry.property_type === 'animal') ?? null;
 
   function LoadoutSlot({
@@ -968,6 +977,11 @@ export default function CharacterSheet({
           <LoadoutSlot label="Weapon" slot="weapon" icon={Sword} item={equippedWeapon} />
           <LoadoutSlot label="Shield" slot="shield" icon={Shield} item={equippedShield} />
           <LoadoutSlot label="Active pet" slot="pet" icon={PawPrint} item={activePetItem} fallbackName={activeAnimal?.custom_name || activeAnimal?.property_name || undefined} />
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {accessoryItems.map((item, index) => (
+            <LoadoutSlot key={index} label={`Accessory ${index + 1}`} slot={`accessory${index + 1}` as LoadoutSlotKey} icon={Gem} item={item} />
+          ))}
         </div>
       </section>
 

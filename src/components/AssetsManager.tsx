@@ -27,7 +27,7 @@ import {
 
 type ListingView = MarketListing & { products: MarketProduct | null };
 
-const STORE_ITEM_TYPES: InventoryItemType[] = ['weapon', 'armor', 'ore', 'potion', 'food', 'plant', 'fabric', 'tool', 'quest', 'misc'];
+const STORE_ITEM_TYPES: InventoryItemType[] = ['weapon', 'armor', 'shield', 'pet', 'accessory', 'ore', 'potion', 'food', 'plant', 'fabric', 'tool', 'quest', 'misc'];
 
 function slug(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');

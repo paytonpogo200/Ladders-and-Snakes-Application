@@ -89,8 +89,8 @@ const marketProducts: SeedProduct[] = [
   p('winter-wear', 'Winter Wear', 50, ['clothier'], { item_type: 'armor' }),
   p('heat-wear', 'Heat Wear', 40, ['clothier'], { item_type: 'armor' }),
   p('rainproof-wear', 'Rainproof Wear', 60, ['clothier'], { item_type: 'armor' }),
-  p('basic-meal', 'Basic Meal', 2, ['tavern'], { item_type: 'consumable' }),
-  p('tavern-meal', 'Tavern Meal', 5, ['tavern'], { item_type: 'consumable' }),
+  p('basic-meal', 'Basic Meal', 2, ['tavern'], { item_type: 'food' }),
+  p('tavern-meal', 'Tavern Meal', 5, ['tavern'], { item_type: 'food' }),
   p('inn-room', 'Inn Room', 10, ['tavern'], { description: 'One standard night of lodging.' }),
   p('fine-inn', 'Fine Inn', 50, ['tavern'], { description: 'One fine night of lodging.' }),
   p('horse', 'Horse', 1000, ['stable'], { description: 'A riding horse.' }),
@@ -102,7 +102,7 @@ const smithProducts: SeedProduct[] = [
   p('dagger', 'Dagger', 50, ['smith'], { item_type: 'weapon' }),
   p('sword', 'Sword', 150, ['smith'], { item_type: 'weapon' }),
   p('spear', 'Spear', 80, ['smith'], { item_type: 'weapon' }),
-  p('shield', 'Shield', 120, ['smith'], { item_type: 'armor' }),
+  p('shield', 'Shield', 120, ['smith'], { item_type: 'shield' }),
   p('custom-weapon', 'Custom Weapon Commission', 200, ['smith'], { item_type: 'weapon', description: 'Starting price; final cost is set over the table.' }),
   p('smith-bronze-scale', 'Bronze Scale', 100, ['smith'], { description: 'Armor or weapon crafting material.' }),
   p('smith-iron-scale', 'Iron Scale', 400, ['smith'], { description: 'Durable material; items made from it will not break.' }),
@@ -167,7 +167,7 @@ const potionLines = [
 const potionProducts: SeedProduct[] = potionLines.flatMap(([key, name, descriptions, prices, stocks]) =>
   (['Lesser', 'Greater', 'Greatest'] as const).map((quality, index) =>
     p(`${key}-${quality.toLowerCase()}`, `${quality} ${name} Potion`, prices[index], ['brewer'], {
-      item_type: 'consumable',
+      item_type: 'potion',
       description: `${descriptions[index]}. Fine quality.`,
       stock_quantity: stocks[index],
       is_available: !(key === 'luck' && index > 0 && stocks[index] === 0)
@@ -209,7 +209,7 @@ const plants = [
 
 const plantProducts: SeedProduct[] = plants.map(([key, name, description]) =>
   p(`plant-${key}`, name, 0, ['pantry'], {
-    item_type: 'consumable',
+    item_type: 'plant',
     description,
     stock_quantity: 0,
     is_available: false
@@ -236,7 +236,7 @@ const catalysts = [
 
 const catalystProducts: SeedProduct[] = catalysts.map(([key, name, description]) =>
   p(`catalyst-${key}`, name, 0, ['pantry'], {
-    item_type: 'consumable',
+    item_type: 'ore',
     description,
     stock_quantity: 0,
     is_available: false
