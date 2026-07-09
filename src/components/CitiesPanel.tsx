@@ -49,8 +49,10 @@ export default function CitiesPanel({ profile }: { profile: Profile }) {
   const [busy, setBusy] = useState(false);
 
   const city = cities.find((entry) => entry.city_key === 'calostrynn') ?? cities[0] ?? null;
-  const cityDenominations = denominations.filter((entry) => entry.currency_system_id === city?.currency_system_id);
-  const visibleCharacters = isDm ? characters.filter((entry) => entry.kind === 'player') : characters.filter((entry) => entry.owner_user_id === profile.id);
+  const cityDenominations = useMemo(() => denominations.filter((entry) => entry.currency_system_id === city?.currency_system_id), [denominations, city?.currency_system_id]);
+  const visibleCharacters = useMemo(() => (
+    isDm ? characters.filter((entry) => entry.kind === 'player') : characters.filter((entry) => entry.owner_user_id === profile.id)
+  ), [characters, isDm, profile.id]);
   const selectedCharacter = visibleCharacters.find((entry) => entry.id === selectedCharacterId) ?? visibleCharacters[0] ?? null;
   const selectedWallet = wallets.find((entry) => entry.character_id === selectedCharacter?.id && entry.currency_system_id === city?.currency_system_id);
   const selectedProduct = listings.find((entry) => entry.products.id === selectedProductId)?.products ?? null;
@@ -59,22 +61,40 @@ export default function CitiesPanel({ profile }: { profile: Profile }) {
     ?? null;
   const selectedAtCity = selectedLocation?.location_key === city?.city_key;
   const servicesAvailable = city?.is_open && selectedAtCity;
-  const ingredientProducts = listings
+  const cityFacilities = useMemo(() => facilities.filter((entry) => entry.city_id === city?.id), [facilities, city?.id]);
+  const vendorsByFacility = useMemo(() => {
+    const grouped = new Map<string, CityVendor[]>();
+    for (const vendor of vendors) {
+      const current = grouped.get(vendor.facility_id) ?? [];
+      current.push(vendor);
+      grouped.set(vendor.facility_id, current);
+    }
+    return grouped;
+  }, [vendors]);
+  const listingsByVendor = useMemo(() => {
+    const grouped = new Map<string, ListingView[]>();
+    for (const listing of listings) {
+      const current = grouped.get(listing.vendor_id) ?? [];
+      current.push(listing);
+      grouped.set(listing.vendor_id, current);
+    }
+    return grouped;
+  }, [listings]);
+  const houseCharacters = useMemo(() => (
+    characters.filter((entry) => entry.owner_user_id === selectedCharacter?.owner_user_id)
+  ), [characters, selectedCharacter?.owner_user_id]);
+  const ingredientProducts = useMemo(() => listings
     .map((entry) => entry.products)
-    .filter((product) => product.product_key.startsWith('plant-') || product.product_key.startsWith('catalyst-'));
+    .filter((product) => product.product_key.startsWith('plant-') || product.product_key.startsWith('catalyst-')), [listings]);
   const ingredientSalesVisible = ingredientProducts.some((product) => product.is_available);
 
-  async function loadData() {
-    await supabase.rpc('ensure_character_locations');
-    const [cityResult, facilityResult, vendorResult, listingResult, systemResult, denominationResult, characterResult, walletResult, campaignLocationResult] = await Promise.all([
+  async function loadCatalogData() {
+    const [cityResult, facilityResult, vendorResult, listingResult, denominationResult, campaignLocationResult] = await Promise.all([
       supabase.from('cities').select('*').order('name'),
       supabase.from('city_facilities').select('*').order('sort_order'),
       supabase.from('city_vendors').select('*').order('sort_order'),
       supabase.from('market_listings').select('*, products:market_products(*)').order('sort_order'),
-      supabase.from('currency_systems').select('*'),
       supabase.from('currency_denominations').select('*').order('sort_order'),
-      supabase.from('characters').select('*').eq('kind', 'player').order('name'),
-      supabase.from('character_wallets').select('*'),
       supabase.from('campaign_locations').select('*')
     ]);
     if (!cityResult.error) setCities((cityResult.data ?? []) as City[]);
@@ -82,32 +102,52 @@ export default function CitiesPanel({ profile }: { profile: Profile }) {
     if (!vendorResult.error) setVendors((vendorResult.data ?? []) as CityVendor[]);
     if (!listingResult.error) setListings((listingResult.data ?? []) as ListingView[]);
     if (!denominationResult.error) setDenominations((denominationResult.data ?? []) as CurrencyDenomination[]);
+    if (!campaignLocationResult.error) setCampaignLocations((campaignLocationResult.data ?? []) as CampaignLocation[]);
+  }
+
+  async function loadCharacterData() {
+    await supabase.rpc('ensure_character_locations');
+    let characterQuery = supabase.from('characters').select('*').eq('kind', 'player').order('name');
+    if (!isDm) characterQuery = characterQuery.eq('owner_user_id', profile.id);
+    const characterResult = await characterQuery;
     if (!characterResult.error) {
       const loaded = (characterResult.data ?? []) as Character[];
       setCharacters(loaded);
-      const mine = isDm ? loaded : loaded.filter((entry) => entry.owner_user_id === profile.id);
-      if (!selectedCharacterId && mine[0]) {
+      if (!selectedCharacterId && loaded[0]) {
         const remembered = readRememberedSelection(profile.id, 'shopping-character');
-        setSelectedCharacterId(mine.some((entry) => entry.id === remembered) ? remembered : mine[0].id);
+        setSelectedCharacterId(loaded.some((entry) => entry.id === remembered) ? remembered : loaded[0].id);
+      }
+
+      if (loaded.length === 0) {
+        setWallets([]);
+      } else {
+        const walletResult = await supabase.from('character_wallets').select('*').in('character_id', loaded.map((entry) => entry.id));
+        if (!walletResult.error) setWallets((walletResult.data ?? []) as CharacterWallet[]);
       }
     }
-    if (!walletResult.error) setWallets((walletResult.data ?? []) as CharacterWallet[]);
-    if (!campaignLocationResult.error) setCampaignLocations((campaignLocationResult.data ?? []) as CampaignLocation[]);
+  }
+
+  async function loadData() {
+    await Promise.all([loadCatalogData(), loadCharacterData()]);
   }
 
   useEffect(() => {
     loadData();
-    const refreshMarket = createDebouncedRefresh(loadData, 220);
+    const refreshCatalog = createDebouncedRefresh(loadCatalogData, 260);
+    const refreshCharacters = createDebouncedRefresh(loadCharacterData, 180);
     const channel = supabase
       .channel('city-market-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'cities' }, refreshMarket)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'city_vendors' }, refreshMarket)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'market_products' }, refreshMarket)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'character_wallets' }, refreshMarket)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'characters' }, refreshMarket)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cities' }, refreshCatalog)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'city_facilities' }, refreshCatalog)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'city_vendors' }, refreshCatalog)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'market_listings' }, refreshCatalog)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'market_products' }, refreshCatalog)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'character_wallets' }, refreshCharacters)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'characters' }, refreshCharacters)
       .subscribe();
     return () => {
-      refreshMarket.cancel();
+      refreshCatalog.cancel();
+      refreshCharacters.cancel();
       supabase.removeChannel(channel);
     };
   }, []);
@@ -117,7 +157,7 @@ export default function CitiesPanel({ profile }: { profile: Profile }) {
     if (selectedCharacterId && visibleCharacters.some((entry) => entry.id === selectedCharacterId)) return;
     const remembered = readRememberedSelection(profile.id, 'shopping-character');
     setSelectedCharacterId(visibleCharacters.some((entry) => entry.id === remembered) ? remembered : visibleCharacters[0].id);
-  }, [visibleCharacters.length]);
+  }, [visibleCharacters, selectedCharacterId, profile.id]);
 
   function chooseShoppingCharacter(characterId: string) {
     setSelectedCharacterId(characterId);
@@ -342,7 +382,7 @@ export default function CitiesPanel({ profile }: { profile: Profile }) {
         <HousePanel
           profile={profile}
           ownerUserId={selectedCharacter.owner_user_id}
-          characters={characters.filter((entry) => entry.owner_user_id === selectedCharacter.owner_user_id)}
+          characters={houseCharacters}
         />
       )}
 
@@ -354,8 +394,8 @@ export default function CitiesPanel({ profile }: { profile: Profile }) {
         </section>
       )}
 
-      {(servicesAvailable || isDm) && facilities.filter((entry) => entry.city_id === city.id).map((facility) => {
-        const facilityVendors = vendors.filter((entry) => entry.facility_id === facility.id);
+      {(servicesAvailable || isDm) && cityFacilities.map((facility) => {
+        const facilityVendors = vendorsByFacility.get(facility.id) ?? [];
         return (
           <details key={facility.id} className="surface overflow-hidden rounded-2xl" open={facility.facility_key === 'market'}>
             <summary className="flex cursor-pointer list-none items-center gap-3 p-4">
@@ -376,8 +416,7 @@ export default function CitiesPanel({ profile }: { profile: Profile }) {
                 </>
               )}
               {facilityVendors.map((vendor) => {
-                const vendorListings = listings
-                  .filter((entry) => entry.vendor_id === vendor.id)
+                const vendorListings = (listingsByVendor.get(vendor.id) ?? [])
                   .filter((entry) => isDm || entry.products.is_available);
                 return (
                   <section key={vendor.id} className="surface-soft rounded-xl p-3">

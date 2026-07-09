@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Heart, Plus, ShieldAlert, Sparkles, Swords, Trash2, XCircle } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import BattleMap from '@/components/BattleMap';
@@ -50,6 +50,8 @@ export default function BattleRoom({ profile }: { profile: Profile }) {
     token_color: firstEnemy.token_color
   });
   const [busy, setBusy] = useState(false);
+  const activeBattleId = useRef<string | null>(null);
+  const initiativeTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const selectedCombatant = combatants.find((entry) => entry.id === selectedCombatantId) ?? null;
   const myCombatants = combatants.filter((entry) => entry.characters?.owner_user_id === profile.id);
@@ -85,12 +87,19 @@ export default function BattleRoom({ profile }: { profile: Profile }) {
   async function loadBattle() {
     const { data, error } = await supabase.from('battles').select('*').eq('status', 'active').order('created_at', { ascending: false }).limit(1).maybeSingle();
     if (error) return;
-    setBattle((data as Battle | null) ?? null);
-    if (data) await loadCombatants(data.id);
+    const active = (data as Battle | null) ?? null;
+    setBattle(active);
+    activeBattleId.current = active?.id ?? null;
+    if (active) await loadCombatants(active.id);
     else {
       setCombatants([]);
       setSelectedCombatantId(null);
     }
+  }
+
+  async function refreshActiveCombatants() {
+    if (!activeBattleId.current) return;
+    await loadCombatants(activeBattleId.current);
   }
 
   useEffect(() => {
@@ -100,21 +109,25 @@ export default function BattleRoom({ profile }: { profile: Profile }) {
     loadBattle();
     const refreshCharacters = createDebouncedRefresh(loadCharacters, 180);
     const refreshBattle = createDebouncedRefresh(loadBattle, 140);
+    const refreshCombatants = createDebouncedRefresh(refreshActiveCombatants, 100);
     const refreshEnemyAssets = createDebouncedRefresh(loadEnemyAssets, 240);
     const refreshTamedBeasts = createDebouncedRefresh(loadTamedBeasts, 180);
     const channel = supabase
       .channel('battle-room-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'characters' }, refreshCharacters)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'battles' }, refreshBattle)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'combatants' }, refreshBattle)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'combatants' }, refreshCombatants)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'enemy_assets' }, refreshEnemyAssets)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tamed_beasts' }, refreshTamedBeasts)
       .subscribe();
     return () => {
       refreshCharacters.cancel();
       refreshBattle.cancel();
+      refreshCombatants.cancel();
       refreshEnemyAssets.cancel();
       refreshTamedBeasts.cancel();
+      initiativeTimers.current.forEach((timer) => clearTimeout(timer));
+      initiativeTimers.current.clear();
       supabase.removeChannel(channel);
     };
   }, []);
@@ -192,7 +205,9 @@ export default function BattleRoom({ profile }: { profile: Profile }) {
       });
       await supabase.from('combatants').insert(rows);
       setSelectedIds([]);
-      await loadBattle();
+      setBattle(created as Battle);
+      activeBattleId.current = created.id;
+      await loadCombatants(created.id);
     }
     setBusy(false);
   }
@@ -203,7 +218,9 @@ export default function BattleRoom({ profile }: { profile: Profile }) {
     await Promise.all(combatants.map((entry) => supabase.from('characters').update({ current_hp: entry.current_hp, current_mana: entry.current_mana }).eq('id', entry.character_id)));
     await supabase.from('battles').update({ status: 'ended', ended_at: new Date().toISOString() }).eq('id', battle.id);
     setBusy(false);
-    await loadBattle();
+    activeBattleId.current = null;
+    setBattle(null);
+    setCombatants([]);
   }
 
   async function saveStats() {
@@ -213,30 +230,33 @@ export default function BattleRoom({ profile }: { profile: Profile }) {
       current_mana: Math.max(0, Number(stats.current_mana) || 0),
       initiative: Number(stats.initiative) || null
     }).eq('id', selectedCombatant.id);
-    await loadCombatants(battle.id);
+    setCombatants((current) => current.map((entry) => entry.id === selectedCombatant.id ? { ...entry, current_hp: Math.max(0, Number(stats.current_hp) || 0), current_mana: Math.max(0, Number(stats.current_mana) || 0), initiative: Number(stats.initiative) || null } : entry));
   }
 
   async function moveCombatant(id: string, x: number, y: number) {
     if (!battle || !isDm) return;
+    setCombatants((current) => current.map((entry) => entry.id === id ? { ...entry, x, y } : entry));
     await supabase.from('combatants').update({ x, y }).eq('id', id);
     setSelectedCombatantId(null);
-    await loadCombatants(battle.id);
   }
 
   async function removeCombatant(id: string) {
     if (!battle || !isDm) return;
     if (selectedCombatantId === id) setSelectedCombatantId(null);
+    setCombatants((current) => current.filter((entry) => entry.id !== id));
     await supabase.from('combatants').delete().eq('id', id);
-    await loadCombatants(battle.id);
   }
 
   async function updateInitiative(id: string, initiative: number) {
     if (!battle || !isDm) return;
-    await supabase
-      .from('combatants')
-      .update({ initiative: Math.max(1, Math.min(20, Number(initiative) || 1)) })
-      .eq('id', id);
-    await loadCombatants(battle.id);
+    const nextInitiative = Math.max(1, Math.min(20, Number(initiative) || 1));
+    setCombatants((current) => current.map((entry) => entry.id === id ? { ...entry, initiative: nextInitiative } : entry));
+    const existing = initiativeTimers.current.get(id);
+    if (existing) clearTimeout(existing);
+    initiativeTimers.current.set(id, setTimeout(async () => {
+      initiativeTimers.current.delete(id);
+      await supabase.from('combatants').update({ initiative: nextInitiative }).eq('id', id);
+    }, 350));
   }
 
   async function addEnemy(event: React.FormEvent) {
@@ -270,7 +290,7 @@ export default function BattleRoom({ profile }: { profile: Profile }) {
         current_hp: hp,
         current_mana: mana
       });
-      await loadBattle();
+      await loadCombatants(battle.id);
     }
   }
 

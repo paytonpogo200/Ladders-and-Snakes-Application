@@ -7,7 +7,6 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import NotificationHub from '@/components/NotificationHub';
 import { createDebouncedRefresh } from '@/lib/realtime';
-import { syncItemCatalogData } from '@/lib/itemCatalogSync';
 import type { Profile } from '@/lib/types';
 
 function PanelLoading({ label }: { label: string }) {
@@ -48,11 +47,6 @@ export default function Dashboard({ profile, userEmail }: { profile: Profile; us
       refreshBattleLock.cancel();
       supabase.removeChannel(channel);
     };
-  }, [isDm, supabase]);
-
-  useEffect(() => {
-    if (!isDm) return;
-    void syncItemCatalogData(supabase);
   }, [isDm, supabase]);
 
   async function signOut() {

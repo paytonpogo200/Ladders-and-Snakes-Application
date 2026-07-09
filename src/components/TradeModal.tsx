@@ -41,19 +41,25 @@ export default function TradeModal({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    Promise.all([
-      supabase.from('characters').select('*').eq('kind', 'player').order('name'),
-      supabase.from('inventory_items').select('*').is('parent_item_id', null).order('item_name'),
-      supabase.from('currency_systems').select('*'),
-      supabase.from('currency_denominations').select('*').order('sort_order')
-    ]).then(([characterResult, itemResult, systemResult, denominationResult]) => {
-      const mine = ((characterResult.data ?? []) as Character[]).filter((entry) => entry.owner_user_id === profile.id);
+    async function loadTradeData() {
+      const [characterResult, systemResult, denominationResult] = await Promise.all([
+        supabase.from('characters').select('*').eq('kind', 'player').eq('owner_user_id', profile.id).order('name'),
+        supabase.from('currency_systems').select('*'),
+        supabase.from('currency_denominations').select('*').order('sort_order')
+      ]);
+      const mine = (characterResult.data ?? []) as Character[];
       setCharacters(mine);
       if (!senderId && mine[0]) {
         const remembered = readRememberedSelection(profile.id, 'trade-sender-character');
         setSenderId(mine.some((entry) => entry.id === remembered) ? remembered : mine[0].id);
       }
-      setItems((itemResult.data ?? []) as InventoryItem[]);
+      const characterIds = [...new Set([...mine.map((entry) => entry.id), targetCharacter.id])];
+      if (characterIds.length > 0) {
+        const itemResult = await supabase.from('inventory_items').select('*').in('character_id', characterIds).is('parent_item_id', null).order('item_name');
+        setItems((itemResult.data ?? []) as InventoryItem[]);
+      } else {
+        setItems([]);
+      }
       setSystems((systemResult.data ?? []) as CurrencySystem[]);
       const loadedDenominations = (denominationResult.data ?? []) as CurrencyDenomination[];
       setDenominations(loadedDenominations);
@@ -61,8 +67,10 @@ export default function TradeModal({
         setOfferedDenomination(loadedDenominations[0].id);
         setRequestedDenomination(loadedDenominations[0].id);
       }
-    });
-  }, []);
+    }
+
+    void loadTradeData();
+  }, [profile.id, supabase, targetCharacter.id]);
 
   const sender = characters.find((entry) => entry.id === senderId) ?? characters[0];
   const senderItems = items.filter((entry) => entry.character_id === sender?.id);

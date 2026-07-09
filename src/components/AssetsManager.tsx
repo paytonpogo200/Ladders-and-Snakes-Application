@@ -9,6 +9,7 @@ import NumberInput from '@/components/NumberInput';
 import { formatCurrency } from '@/lib/format';
 import { DEFAULT_CLASS_ASSETS } from '@/lib/classPresets';
 import { DEFAULT_ENEMY_ASSETS, ENEMY_CATEGORIES } from '@/lib/enemyPresets';
+import { syncItemCatalogData } from '@/lib/itemCatalogSync';
 import {
   ATTRIBUTE_KEYS,
   ATTRIBUTE_LABELS,
@@ -96,6 +97,15 @@ export default function AssetsManager({ profile }: { profile: Profile }) {
       return;
     }
     setMessage('Default classes and bestiary loaded.');
+    await loadAssets();
+  }
+
+  async function runCatalogMaintenance() {
+    setSaving(true);
+    setMessage('');
+    const result = await syncItemCatalogData(supabase, { force: true });
+    setSaving(false);
+    setMessage(result);
     await loadAssets();
   }
 
@@ -233,6 +243,13 @@ export default function AssetsManager({ profile }: { profile: Profile }) {
           <button onClick={seedDefaults} disabled={saving} className="primary-button mt-3 flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-black"><WandSparkles size={17} /> Load defaults</button>
         </section>
       )}
+
+      <section className="rounded-2xl border border-[var(--line)] bg-black/15 p-4">
+        <h3 className="font-black">Maintenance</h3>
+        <button onClick={runCatalogMaintenance} disabled={saving} className="teal-button mt-3 flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-black disabled:opacity-45">
+          <WandSparkles size={17} /> Sync item catalog
+        </button>
+      </section>
 
       <div className="grid grid-cols-3 gap-2">
         <button onClick={() => setSection('classes')} className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 font-black ${section === 'classes' ? 'bg-[var(--paper)] text-[#141915]' : 'surface text-[var(--muted)]'}`}><BookOpen size={17} /> Classes</button>

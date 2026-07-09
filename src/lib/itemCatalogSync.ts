@@ -96,9 +96,9 @@ async function syncMarketProducts(supabase: SupabaseLike) {
   }
 }
 
-export async function syncItemCatalogData(supabase: SupabaseLike) {
-  if (typeof window === 'undefined') return;
-  if (window.localStorage.getItem(SYNC_KEY) === 'done') return;
+export async function syncItemCatalogData(supabase: SupabaseLike, options: { force?: boolean } = {}) {
+  if (typeof window === 'undefined') return catalogSyncSummary();
+  if (!options.force && window.localStorage.getItem(SYNC_KEY) === 'done') return catalogSyncSummary();
 
   await Promise.all([
     syncInventoryTable(supabase, 'inventory_items'),
@@ -108,6 +108,7 @@ export async function syncItemCatalogData(supabase: SupabaseLike) {
   ]);
 
   window.localStorage.setItem(SYNC_KEY, 'done');
+  return `Catalog synced. ${catalogSyncSummary()}`;
 }
 
 export function catalogSyncSummary() {

@@ -37,18 +37,26 @@ export default function NotificationHub({ profile }: { profile: Profile }) {
 
   async function load() {
     await supabase.rpc('ensure_player_locations');
-    const [notificationResult, tradeResult, tradeItemResult, transferResult, characterResult, locationResult, playerLocationResult] = await Promise.all([
+    const [notificationResult, tradeResult, transferResult, characterResult, locationResult, playerLocationResult] = await Promise.all([
       supabase.from('campaign_notifications').select('*').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(80),
       supabase.from('trade_offers').select('*').or(`sender_user_id.eq.${profile.id},recipient_user_id.eq.${profile.id}`).order('created_at', { ascending: false }).limit(40),
-      supabase.from('trade_offer_items').select('*'),
-      supabase.from('item_transfer_requests').select('*').eq('status', 'pending').order('created_at'),
+      supabase.from('item_transfer_requests').select('*').eq('status', 'pending').or(`sender_user_id.eq.${profile.id},recipient_user_id.eq.${profile.id}`).order('created_at'),
       supabase.from('characters').select('*').eq('kind', 'player'),
       supabase.from('campaign_locations').select('*').order('created_at'),
       supabase.from('player_locations').select('*').eq('user_id', profile.id).maybeSingle()
     ]);
     if (!notificationResult.error) setNotifications((notificationResult.data ?? []) as CampaignNotification[]);
-    if (!tradeResult.error) setTrades((tradeResult.data ?? []) as TradeOffer[]);
-    if (!tradeItemResult.error) setTradeItems((tradeItemResult.data ?? []) as TradeOfferItem[]);
+    if (!tradeResult.error) {
+      const loadedTrades = (tradeResult.data ?? []) as TradeOffer[];
+      setTrades(loadedTrades);
+      const offerIds = loadedTrades.map((entry) => entry.id);
+      if (offerIds.length > 0) {
+        const { data, error } = await supabase.from('trade_offer_items').select('*').in('offer_id', offerIds);
+        if (!error) setTradeItems((data ?? []) as TradeOfferItem[]);
+      } else {
+        setTradeItems([]);
+      }
+    }
     if (!transferResult.error) setItemTransfers((transferResult.data ?? []) as ItemTransferRequest[]);
     if (!characterResult.error) setCharacters((characterResult.data ?? []) as Character[]);
     if (!locationResult.error) {
@@ -73,8 +81,10 @@ export default function NotificationHub({ profile }: { profile: Profile }) {
     const refreshNotifications = createDebouncedRefresh(load, 220);
     const channel = supabase.channel(`notification-hub-${profile.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_notifications', filter: `user_id=eq.${profile.id}` }, refreshNotifications)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_offers' }, refreshNotifications)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'item_transfer_requests' }, refreshNotifications)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_offers', filter: `sender_user_id=eq.${profile.id}` }, refreshNotifications)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_offers', filter: `recipient_user_id=eq.${profile.id}` }, refreshNotifications)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'item_transfer_requests', filter: `sender_user_id=eq.${profile.id}` }, refreshNotifications)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'item_transfer_requests', filter: `recipient_user_id=eq.${profile.id}` }, refreshNotifications)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'player_locations', filter: `user_id=eq.${profile.id}` }, refreshNotifications)
       .subscribe();
     return () => {
@@ -87,8 +97,18 @@ export default function NotificationHub({ profile }: { profile: Profile }) {
     return characters.find((entry) => entry.id === id)?.name ?? 'Unknown character';
   }
 
+  const tradeItemsByOffer = useMemo(() => {
+    const grouped = new Map<string, TradeOfferItem[]>();
+    for (const item of tradeItems) {
+      const current = grouped.get(item.offer_id) ?? [];
+      current.push(item);
+      grouped.set(item.offer_id, current);
+    }
+    return grouped;
+  }, [tradeItems]);
+
   function tradeSummary(trade: TradeOffer) {
-    const lines = tradeItems.filter((entry) => entry.offer_id === trade.id);
+    const lines = tradeItemsByOffer.get(trade.id) ?? [];
     const offered = lines.filter((entry) => entry.side === 'offered').map((entry) => `${entry.quantity}× ${entry.item_name}`);
     const requested = lines.filter((entry) => entry.side === 'requested').map((entry) => `${entry.quantity}× ${entry.item_name}`);
     if (trade.offered_currency_base > 0) offered.push(`${trade.offered_currency_base} base currency`);

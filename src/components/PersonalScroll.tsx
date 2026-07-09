@@ -44,6 +44,11 @@ export default function PersonalScroll({ profile }: { profile: Profile }) {
   const strokesRef = useRef<Stroke[]>([]);
   const drawingRef = useRef(false);
   const currentStrokeRef = useRef<Stroke | null>(null);
+  const canvasSizeRef = useRef({ width: 0, height: 0, dpr: 0 });
+  const drawFrameRef = useRef<number | null>(null);
+  const pendingDrawRef = useRef<Stroke | null>(null);
+  const pendingErasePointRef = useRef<StrokePoint | null>(null);
+  const eraseFrameRef = useRef<number | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [stylusMode, setStylusMode] = useState(false);
@@ -59,10 +64,15 @@ export default function PersonalScroll({ profile }: { profile: Profile }) {
     if (!canvas || !scroll || typeof window === 'undefined') return;
     const rect = scroll.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-    canvas.height = Math.max(1, Math.floor(rect.height * dpr));
-    canvas.style.width = `${rect.width}px`;
-    canvas.style.height = `${rect.height}px`;
+    const width = Math.max(1, Math.floor(rect.width * dpr));
+    const height = Math.max(1, Math.floor(rect.height * dpr));
+    if (canvasSizeRef.current.width !== width || canvasSizeRef.current.height !== height || canvasSizeRef.current.dpr !== dpr) {
+      canvas.width = width;
+      canvas.height = height;
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
+      canvasSizeRef.current = { width, height, dpr };
+    }
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -84,6 +94,15 @@ export default function PersonalScroll({ profile }: { profile: Profile }) {
     });
   }
 
+  function scheduleDraw(extra?: Stroke | null) {
+    pendingDrawRef.current = extra ?? null;
+    if (drawFrameRef.current !== null) return;
+    drawFrameRef.current = window.requestAnimationFrame(() => {
+      drawFrameRef.current = null;
+      drawAll(pendingDrawRef.current);
+    });
+  }
+
   useEffect(() => {
     strokesRef.current = strokes;
     drawAll();
@@ -96,6 +115,8 @@ export default function PersonalScroll({ profile }: { profile: Profile }) {
     if (scrollRef.current) resize.observe(scrollRef.current);
     window.addEventListener('resize', handleResize);
     return () => {
+      if (drawFrameRef.current !== null) window.cancelAnimationFrame(drawFrameRef.current);
+      if (eraseFrameRef.current !== null) window.cancelAnimationFrame(eraseFrameRef.current);
       resize.disconnect();
       window.removeEventListener('resize', handleResize);
     };
@@ -173,6 +194,17 @@ export default function PersonalScroll({ profile }: { profile: Profile }) {
     }
   }
 
+  function scheduleErase(point: StrokePoint) {
+    pendingErasePointRef.current = point;
+    if (eraseFrameRef.current !== null) return;
+    eraseFrameRef.current = window.requestAnimationFrame(() => {
+      eraseFrameRef.current = null;
+      const pending = pendingErasePointRef.current;
+      pendingErasePointRef.current = null;
+      if (pending) eraseAt(pending);
+    });
+  }
+
   function startDrawing(event: React.PointerEvent<HTMLCanvasElement>) {
     if (!stylusMode) return;
     event.preventDefault();
@@ -192,13 +224,15 @@ export default function PersonalScroll({ profile }: { profile: Profile }) {
     event.preventDefault();
     const point = pointFromEvent(event);
     if (drawTool === 'eraser') {
-      eraseAt(point);
+      scheduleErase(point);
       return;
     }
     const current = currentStrokeRef.current;
     if (!current) return;
+    const last = current.points[current.points.length - 1];
+    if (last && Math.hypot(point.x - last.x, point.y - last.y) < 0.002) return;
     current.points.push(point);
-    drawAll(current);
+    scheduleDraw(current);
   }
 
   function finishDrawing() {

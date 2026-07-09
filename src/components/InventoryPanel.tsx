@@ -154,7 +154,7 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
   const [busy, setBusy] = useState(false);
   const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
   const [dragTargetKey, setDragTargetKey] = useState<string | null>(null);
-  const [dragGhost, setDragGhost] = useState<{ item: InventoryItemWithLock; x: number; y: number } | null>(null);
+  const [dragGhostItem, setDragGhostItem] = useState<InventoryItemWithLock | null>(null);
   const [openStorageIds, setOpenStorageIds] = useState<Set<string>>(() => new Set());
   const [addMode, setAddMode] = useState<'catalog' | 'custom'>('catalog');
   const [catalogSearch, setCatalogSearch] = useState('');
@@ -162,8 +162,13 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
   const dragCandidate = useRef<{ item: InventoryItemWithLock; x: number; y: number } | null>(null);
   const draggingItem = useRef<InventoryItemWithLock | null>(null);
   const dragTarget = useRef<{ slot: number; parentId: string | null } | null>(null);
+  const dragTargetKeyRef = useRef<string | null>(null);
+  const dragGhostRef = useRef<HTMLDivElement | null>(null);
+  const dragGhostPosition = useRef({ x: -9999, y: -9999 });
   const autoScrollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const autoScrollDirection = useRef(0);
+  const transferOptionsLoaded = useRef(false);
+  const transferOptionsLoading = useRef<Promise<void> | null>(null);
   const suppressClick = useRef(false);
   const [form, setForm] = useState({
     item_name: '',
@@ -181,6 +186,7 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
   });
 
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null;
+  const dragGhost = { item: dragGhostItem as InventoryItemWithLock };
   const slotCount = Math.max(0, Math.min(100, character.inventory_slots ?? 20));
   const mainItems = items.filter((item) => item.parent_item_id === null && !item.is_storage && !item.equipped);
   const storageItems = items.filter((item) => item.is_storage);
@@ -263,15 +269,29 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
     autoScrollTimer.current = setInterval(() => window.scrollBy({ top: direction * 9, behavior: 'auto' }), 24);
   }
 
+  function placeDragGhost(x: number, y: number) {
+    dragGhostPosition.current = { x, y };
+    if (dragGhostRef.current) {
+      dragGhostRef.current.style.transform = `translate3d(${x + 12}px, ${y + 12}px, 0)`;
+    }
+  }
+
+  function setDragTargetKeyIfChanged(key: string | null) {
+    if (dragTargetKeyRef.current === key) return;
+    dragTargetKeyRef.current = key;
+    setDragTargetKey(key);
+  }
+
   function resetDrag() {
     if (dragTimer.current) clearTimeout(dragTimer.current);
     dragTimer.current = null;
     dragCandidate.current = null;
     draggingItem.current = null;
     dragTarget.current = null;
+    dragTargetKeyRef.current = null;
     setDraggingItemId(null);
-    setDragTargetKey(null);
-    setDragGhost(null);
+    setDragTargetKeyIfChanged(null);
+    setDragGhostItem(null);
     stopAutoScroll();
     document.body.classList.remove('inventory-drag-active');
   }
@@ -288,20 +308,30 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
     setItems(loaded);
   }
 
-  async function loadTransferOptions() {
-    const [characterResult, capacityResult, spellResult] = await Promise.all([
-      supabase.from('characters').select('*').eq('kind', 'player').order('name'),
-      supabase.rpc('get_character_transfer_capacity'),
-      supabase.from('spells').select('*').order('category').order('name')
-    ]);
+  async function loadTransferOptions(force = false) {
+    if (!force && transferOptionsLoaded.current) return;
+    if (transferOptionsLoading.current) return transferOptionsLoading.current;
 
-    if (!characterResult.error) {
-      const loaded = ((characterResult.data ?? []) as Character[]).filter((entry) => entry.id !== character.id && entry.owner_user_id);
-      setCharacters(loaded);
-      if (!transferTargetId && loaded[0]) setTransferTargetId(loaded[0].id);
-    }
-    if (!capacityResult.error) setCapacities((capacityResult.data ?? []) as CharacterTransferCapacity[]);
-    if (!spellResult.error) setSpells((spellResult.data ?? []) as Spell[]);
+    transferOptionsLoading.current = (async () => {
+      const [characterResult, capacityResult, spellResult] = await Promise.all([
+        supabase.from('characters').select('*').eq('kind', 'player').order('name'),
+        supabase.rpc('get_character_transfer_capacity'),
+        supabase.from('spells').select('*').order('category').order('name')
+      ]);
+
+      if (!characterResult.error) {
+        const loaded = ((characterResult.data ?? []) as Character[]).filter((entry) => entry.id !== character.id && entry.owner_user_id);
+        setCharacters(loaded);
+        setTransferTargetId((current) => current || loaded[0]?.id || '');
+      }
+      if (!capacityResult.error) setCapacities((capacityResult.data ?? []) as CharacterTransferCapacity[]);
+      if (!spellResult.error) setSpells((spellResult.data ?? []) as Spell[]);
+      transferOptionsLoaded.current = true;
+    })().finally(() => {
+      transferOptionsLoading.current = null;
+    });
+
+    return transferOptionsLoading.current;
   }
 
   useEffect(() => {
@@ -310,7 +340,6 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
 
   useEffect(() => {
     loadItems();
-    loadTransferOptions();
     const refreshItems = createDebouncedRefresh(loadItems, 120);
     const channel = supabase
       .channel(`inventory-${character.id}`)
@@ -332,16 +361,16 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
       }
       if (!draggingItem.current) return;
       event.preventDefault();
-      setDragGhost({ item: draggingItem.current, x: event.clientX, y: event.clientY });
+      placeDragGhost(event.clientX, event.clientY);
       const element = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-inventory-slot]') as HTMLElement | null;
       if (element) {
         const slot = Number(element.dataset.slotIndex);
         const parentId = element.dataset.parentId === 'main' ? null : element.dataset.parentId ?? null;
         dragTarget.current = Number.isFinite(slot) ? { slot, parentId } : null;
-        setDragTargetKey(Number.isFinite(slot) ? slotKey(slot, parentId) : null);
+        setDragTargetKeyIfChanged(Number.isFinite(slot) ? slotKey(slot, parentId) : null);
       } else {
         dragTarget.current = null;
-        setDragTargetKey(null);
+        setDragTargetKeyIfChanged(null);
       }
       const edge = 92;
       setAutoScroll(event.clientY < edge ? -1 : event.clientY > window.innerHeight - edge ? 1 : 0);
@@ -383,7 +412,8 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
     dragTimer.current = setTimeout(() => {
       draggingItem.current = item;
       setDraggingItemId(item.id);
-      setDragGhost({ item, x: event.clientX, y: event.clientY });
+      placeDragGhost(event.clientX, event.clientY);
+      setDragGhostItem(item);
       document.body.classList.add('inventory-drag-active');
       if (navigator.vibrate) navigator.vibrate(18);
     }, 380);
@@ -457,7 +487,7 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
       if (dragged) {
         const stacked = await stackItemIntoSlot(dragged, slot, parentId);
         if (stacked) {
-          setDragTargetKey(null);
+          setDragTargetKeyIfChanged(null);
           return;
         }
       }
@@ -471,7 +501,7 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
         return;
       }
       await unequipItem(itemId);
-      setDragTargetKey(null);
+        setDragTargetKeyIfChanged(null);
       await loadItems();
       return;
     }
@@ -486,6 +516,7 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
 
   function openItem(item: InventoryItemWithLock) {
     const matchedSpell = spells.find((spell) => spell.name === imbuedSpellName(item.notes));
+    if (itemTypeValue(item) === 'weapon' && spells.length === 0) void loadTransferOptions();
     setSelectedItemId(item.id);
     setEmptyTarget(null);
     setAction('inspect');
@@ -509,6 +540,7 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
 
   function openEmpty(slot: number, parentId: string | null) {
     if (!canEdit) return;
+    void loadTransferOptions();
     setSelectedItemId(null);
     setEmptyTarget({ slot, parentId });
     setAction('inspect');
@@ -779,10 +811,12 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
           if (Array.from(event.dataTransfer.types).includes('application/x-inventory-item-id')) {
             event.preventDefault();
             event.dataTransfer.dropEffect = 'move';
-            setDragTargetKey(key);
+            setDragTargetKeyIfChanged(key);
           }
         }}
-        onDragLeave={() => setDragTargetKey((current) => (current === key ? null : current))}
+        onDragLeave={() => {
+          if (dragTargetKeyRef.current === key) setDragTargetKeyIfChanged(null);
+        }}
         onDrop={(event) => dropNativeDraggedItem(event, slot, parentId)}
         onPointerDown={(event) => item && beginLongPress(item, event)}
         onClick={() => {
@@ -999,6 +1033,7 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
                   <label className="block">
                     <span className="mb-1 block text-[10px] font-black uppercase text-[var(--muted)]">Send to</span>
                     <select className="field" value={transferTargetId} onChange={(event) => setTransferTargetId(event.target.value)}>
+                      {characters.length === 0 && <option value="">Loading recipients…</option>}
                       {characters.map((entry) => {
                         const free = capacities.find((capacity) => capacity.character_id === entry.id)?.free_slots ?? 0;
                         return <option key={entry.id} value={entry.id}>{entry.name} · {free > 0 || selectedItem.is_storage ? `${free} spaces` : 'FULL'}</option>;
@@ -1028,7 +1063,7 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
               <div className="mt-4 flex flex-wrap gap-2">
                 {selectedItem && mayManage && <button type="button" onClick={() => { setAction('drop'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#d76a6255] px-4 py-3 text-sm font-black text-[var(--red)]"><Trash2 size={16} /> Drop</button>}
                 {selectedItem && mayManage && isPotionItem(selectedItem.item_type, selectedItem.item_name) && <button type="button" onClick={consumePotion} disabled={busy} className="flex items-center gap-2 rounded-xl border border-[#63b5a555] px-4 py-3 text-sm font-black text-[var(--teal)] disabled:opacity-40"><FlaskConical size={16} /> Consume</button>}
-                {selectedItem && mayManage && characters.length > 0 && !selectedItem.is_trade_locked && <button type="button" onClick={() => { setAction('give'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#9caf7955] px-4 py-3 text-sm font-black text-[var(--teal)]"><Send size={16} /> Give</button>}
+                {selectedItem && mayManage && !selectedItem.is_trade_locked && <button type="button" onClick={() => { void loadTransferOptions(); setAction('give'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#9caf7955] px-4 py-3 text-sm font-black text-[var(--teal)]"><Send size={16} /> Give</button>}
                 {selectedItem && mayManage && selectedItem.is_trade_locked && <span className="flex items-center gap-2 rounded-xl border border-[#d1a85b55] px-4 py-3 text-sm font-black text-[var(--brass)]">Unique · cannot trade</span>}
                 {selectedItem && mayManage && <button type="button" onClick={() => { setAction('house'); setActionQuantity(1); }} className="flex items-center gap-2 rounded-xl border border-[#e0a64e55] px-4 py-3 text-sm font-black text-[var(--brass)]"><Home size={16} /> House</button>}
                 {canEdit && <button type="submit" disabled={busy || !form.item_name.trim()} className="primary-button ml-auto rounded-xl px-4 py-3 text-sm font-black disabled:opacity-40">{selectedItem ? 'Save item' : 'Add item'}</button>}
@@ -1038,8 +1073,12 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
         </Modal>
       )}
 
-      {dragGhost && (
-        <div className={`inventory-drag-ghost pointer-events-none fixed z-[100] rounded-xl border px-3 py-2 text-xs font-black shadow-2xl ${rarityClass(dragGhost.item.rarity)} ${imbuedSpellName(dragGhost.item.notes) ? 'inventory-enchanted-outline' : ''}`} style={{ left: dragGhost.x + 12, top: dragGhost.y + 12 }}>
+      {dragGhostItem && (
+        <div
+          ref={dragGhostRef}
+          className={`inventory-drag-ghost pointer-events-none fixed left-0 top-0 z-[100] rounded-xl border px-3 py-2 text-xs font-black shadow-2xl will-change-transform ${rarityClass(dragGhostItem.rarity)} ${imbuedSpellName(dragGhostItem.notes) ? 'inventory-enchanted-outline' : ''}`}
+          style={{ transform: `translate3d(${dragGhostPosition.current.x + 12}px, ${dragGhostPosition.current.y + 12}px, 0)` }}
+        >
           {dragGhost.item.item_name} ×{dragGhost.item.quantity}
         </div>
       )}

@@ -192,7 +192,7 @@ export default function CharacterSheet({
   const [loadoutAction, setLoadoutAction] = useState<'inspect' | 'drop'>('inspect');
   const [loadoutQuantity, setLoadoutQuantity] = useState(1);
   const [loadoutBusy, setLoadoutBusy] = useState(false);
-  const [loadoutDragGhost, setLoadoutDragGhost] = useState<{ item: InventoryItemWithModifiers; x: number; y: number } | null>(null);
+  const [loadoutDragGhostItem, setLoadoutDragGhostItem] = useState<InventoryItemWithModifiers | null>(null);
   const [loadoutDraggingItemId, setLoadoutDraggingItemId] = useState<string | null>(null);
   const [canPortalLoadoutGhost, setCanPortalLoadoutGhost] = useState(false);
   const [inventoryRefreshSignal, setInventoryRefreshSignal] = useState(0);
@@ -214,6 +214,10 @@ export default function CharacterSheet({
   const loadoutDragCandidate = useRef<{ item: InventoryItemWithModifiers; x: number; y: number } | null>(null);
   const loadoutDraggingItem = useRef<InventoryItemWithModifiers | null>(null);
   const loadoutDragTarget = useRef<{ kind: 'loadout'; slot: LoadoutSlotKey } | { kind: 'inventory'; slot: number; parentId: string | null } | null>(null);
+  const loadoutDragGhostRef = useRef<HTMLDivElement | null>(null);
+  const loadoutDragGhostPosition = useRef({ x: -9999, y: -9999 });
+  const hoveredLoadoutSlotRef = useRef<LoadoutSlotKey | null>(null);
+  const hoveredInventorySlotRef = useRef<string | null>(null);
   const suppressLoadoutClick = useRef(false);
   const mayManage = profile.role === 'dm' || character.owner_user_id === profile.id;
 
@@ -248,28 +252,43 @@ export default function CharacterSheet({
 
   useEffect(() => {
     const supabase = createClient();
-    Promise.all([
-      supabase.from('class_assets').select('*').eq('class_key', character.class_key).maybeSingle(),
+    const utilityQueries = !readOnly ? [
       supabase.from('currency_systems').select('*'),
       supabase.from('currency_denominations').select('*').order('sort_order'),
-      supabase.from('character_wallets').select('*').eq('character_id', character.id),
+      supabase.from('character_wallets').select('*').eq('character_id', character.id)
+    ] as const : [];
+    const dmQueries = canEdit ? [
       supabase.from('market_products').select('*').order('name'),
       supabase.from('spells').select('*').order('category').order('name')
-    ]).then(([classResult, systemsResult, denominationsResult, walletsResult, productsResult, spellResult]) => {
+    ] as const : [];
+
+    Promise.all([
+      supabase.from('class_assets').select('*').eq('class_key', character.class_key).maybeSingle(),
+      ...utilityQueries,
+      ...dmQueries
+    ]).then((results) => {
+      const [classResult] = results;
+      const systemsResult = !readOnly ? results[1] : null;
+      const denominationsResult = !readOnly ? results[2] : null;
+      const walletsResult = !readOnly ? results[3] : null;
+      const dmOffset = !readOnly ? 4 : 1;
+      const productsResult = canEdit ? results[dmOffset] : null;
+      const spellResult = canEdit ? results[dmOffset + 1] : null;
+
       if (classResult.data) setClassPreset(classAssetToPreset(classResult.data as ClassAsset));
-      setCurrencySystems((systemsResult.data ?? []) as CurrencySystem[]);
-      const loadedDenominations = (denominationsResult.data ?? []) as CurrencyDenomination[];
+      setCurrencySystems((systemsResult?.data ?? []) as CurrencySystem[]);
+      const loadedDenominations = (denominationsResult?.data ?? []) as CurrencyDenomination[];
       setDenominations(loadedDenominations);
       if (!currencyForm.denomination_id && loadedDenominations[0]) {
         setCurrencyForm((current) => ({ ...current, denomination_id: loadedDenominations[0].id }));
       }
-      setWallets((walletsResult.data ?? []) as CharacterWallet[]);
-      const loadedProducts = (productsResult.data ?? []) as MarketProduct[];
+      setWallets((walletsResult?.data ?? []) as CharacterWallet[]);
+      const loadedProducts = (productsResult?.data ?? []) as MarketProduct[];
       setProducts(loadedProducts);
       if (!grantProductId && loadedProducts[0]) setGrantProductId(loadedProducts[0].id);
-      setSpells((spellResult.data ?? []) as Spell[]);
+      setSpells((spellResult?.data ?? []) as Spell[]);
     });
-  }, [character.class_key]);
+  }, [character.class_key, character.id, canEdit, readOnly]);
 
   async function loadLoadoutStrip() {
     const supabase = createClient();
@@ -404,7 +423,7 @@ export default function CharacterSheet({
 
   async function equipDroppedItem(slot: LoadoutSlotKey, event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    setHoveredLoadoutSlot(null);
+    setHoveredLoadoutSlotIfChanged(null);
 
     const propertyId = event.dataTransfer.getData('application/x-character-property-id');
     if (slot === 'pet' && propertyId) {
@@ -471,6 +490,25 @@ export default function CharacterSheet({
     return { error: 'No open inventory slot to unequip this item.', slot: null as number | null };
   }
 
+  function placeLoadoutDragGhost(x: number, y: number) {
+    loadoutDragGhostPosition.current = { x, y };
+    if (loadoutDragGhostRef.current) {
+      loadoutDragGhostRef.current.style.transform = `translate3d(${x + 12}px, ${y + 12}px, 0)`;
+    }
+  }
+
+  function setHoveredLoadoutSlotIfChanged(slot: LoadoutSlotKey | null) {
+    if (hoveredLoadoutSlotRef.current === slot) return;
+    hoveredLoadoutSlotRef.current = slot;
+    setHoveredLoadoutSlot(slot);
+  }
+
+  function setHoveredInventorySlotIfChanged(slot: string | null) {
+    if (hoveredInventorySlotRef.current === slot) return;
+    hoveredInventorySlotRef.current = slot;
+    setHoveredInventorySlot(slot);
+  }
+
   function resetLoadoutDrag() {
     if (loadoutDragTimer.current) clearTimeout(loadoutDragTimer.current);
     loadoutDragTimer.current = null;
@@ -478,9 +516,9 @@ export default function CharacterSheet({
     loadoutDraggingItem.current = null;
     loadoutDragTarget.current = null;
     setLoadoutDraggingItemId(null);
-    setLoadoutDragGhost(null);
-    setHoveredLoadoutSlot(null);
-    setHoveredInventorySlot(null);
+    setLoadoutDragGhostItem(null);
+    setHoveredLoadoutSlotIfChanged(null);
+    setHoveredInventorySlotIfChanged(null);
     document.body.classList.remove('inventory-drag-active');
   }
 
@@ -491,7 +529,8 @@ export default function CharacterSheet({
     suppressLoadoutClick.current = true;
     setLoadoutDraggingItemId(item.id);
     loadoutDraggingItem.current = item;
-    setLoadoutDragGhost({ item, x, y });
+    placeLoadoutDragGhost(x, y);
+    setLoadoutDragGhostItem(item);
     document.body.classList.add('inventory-drag-active');
     if (navigator.vibrate) navigator.vibrate(18);
   }
@@ -623,7 +662,7 @@ export default function CharacterSheet({
       }
       if (!loadoutDraggingItem.current) return;
       event.preventDefault();
-      setLoadoutDragGhost({ item: loadoutDraggingItem.current, x: event.clientX, y: event.clientY });
+      placeLoadoutDragGhost(event.clientX, event.clientY);
 
       const element = document.elementFromPoint(event.clientX, event.clientY);
       const loadoutElement = element?.closest('[data-loadout-slot]') as HTMLElement | null;
@@ -632,17 +671,18 @@ export default function CharacterSheet({
       if (loadoutElement?.dataset.loadoutSlot) {
         const slot = loadoutElement.dataset.loadoutSlot as LoadoutSlotKey;
         loadoutDragTarget.current = { kind: 'loadout', slot };
-        setHoveredLoadoutSlot(slot);
+        setHoveredLoadoutSlotIfChanged(slot);
+        setHoveredInventorySlotIfChanged(null);
       } else if (inventoryElement) {
         const slot = Number(inventoryElement.dataset.slotIndex);
         const parentId = inventoryElement.dataset.parentId === 'main' ? null : inventoryElement.dataset.parentId ?? null;
         loadoutDragTarget.current = Number.isFinite(slot) ? { kind: 'inventory', slot, parentId } : null;
-        setHoveredLoadoutSlot(null);
-        setHoveredInventorySlot(Number.isFinite(slot) ? inventorySlotKey(slot, parentId) : null);
+        setHoveredLoadoutSlotIfChanged(null);
+        setHoveredInventorySlotIfChanged(Number.isFinite(slot) ? inventorySlotKey(slot, parentId) : null);
       } else {
         loadoutDragTarget.current = null;
-        setHoveredLoadoutSlot(null);
-        setHoveredInventorySlot(null);
+        setHoveredLoadoutSlotIfChanged(null);
+        setHoveredInventorySlotIfChanged(null);
       }
     }
 
@@ -779,9 +819,11 @@ export default function CharacterSheet({
         onDragOver={(event) => {
           event.preventDefault();
           event.dataTransfer.dropEffect = 'move';
-          setHoveredLoadoutSlot(slot);
+          setHoveredLoadoutSlotIfChanged(slot);
         }}
-        onDragLeave={() => setHoveredLoadoutSlot((current) => (current === slot ? null : current))}
+        onDragLeave={() => {
+          if (hoveredLoadoutSlotRef.current === slot) setHoveredLoadoutSlotIfChanged(null);
+        }}
         onDrop={(event) => equipDroppedItem(slot, event)}
         title={item ? `${displayName} — click to inspect/edit. Drag to move.` : `Drag a ${label.toLowerCase()} item here to equip it.`}
       >
@@ -1221,9 +1263,13 @@ export default function CharacterSheet({
         </Modal>
       )}
 
-      {canPortalLoadoutGhost && loadoutDragGhost && createPortal(
-        <div className={`inventory-drag-ghost pointer-events-none fixed z-[100] rounded-xl border px-3 py-2 text-xs font-black shadow-2xl ${rarityClass(loadoutDragGhost.item.rarity)} ${imbuedSpellName(loadoutDragGhost.item.notes) ? 'inventory-enchanted-outline' : ''}`} style={{ left: loadoutDragGhost.x + 12, top: loadoutDragGhost.y + 12 }}>
-          {loadoutDragGhost.item.item_name} x{loadoutDragGhost.item.quantity}
+      {canPortalLoadoutGhost && loadoutDragGhostItem && createPortal(
+        <div
+          ref={loadoutDragGhostRef}
+          className={`inventory-drag-ghost pointer-events-none fixed left-0 top-0 z-[100] rounded-xl border px-3 py-2 text-xs font-black shadow-2xl will-change-transform ${rarityClass(loadoutDragGhostItem.rarity)} ${imbuedSpellName(loadoutDragGhostItem.notes) ? 'inventory-enchanted-outline' : ''}`}
+          style={{ transform: `translate3d(${loadoutDragGhostPosition.current.x + 12}px, ${loadoutDragGhostPosition.current.y + 12}px, 0)` }}
+        >
+          {loadoutDragGhostItem.item_name} x{loadoutDragGhostItem.quantity}
         </div>,
         document.body
       )}
