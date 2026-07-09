@@ -8,6 +8,7 @@ import Modal from '@/components/Modal';
 import { rarityClass } from '@/lib/rarity';
 import { createDebouncedRefresh } from '@/lib/realtime';
 import { ITEM_CATALOG, type ItemCatalogEntry } from '@/lib/itemCatalog';
+import { parkVisibleEquippedItems } from '@/lib/inventoryParking';
 import { storageCapacityForItem } from '@/lib/itemTyping';
 import { GLASS_FLASK_CATALOG_ITEM, isPotionItem, potionEffect } from '@/lib/itemCatalogTools';
 import { ATTRIBUTE_KEYS, ATTRIBUTE_LABELS, type Character, type CharacterAttributes, type CharacterTransferCapacity, type InventoryItem, type InventoryItemType, type Profile, type Spell } from '@/lib/types';
@@ -184,7 +185,7 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
   const mainItems = items.filter((item) => item.parent_item_id === null && !item.is_storage && !item.equipped);
   const storageItems = items.filter((item) => item.is_storage);
   const occupiedSlotKeys = useMemo(() => new Set(items
-    .filter((item) => item.slot_index >= 0 && !item.is_storage)
+    .filter((item) => item.slot_index >= 0 && !item.is_storage && !item.equipped)
     .map((item) => slotKey(item.slot_index, item.parent_item_id))
   ), [items]);
   const mainItemBySlot = useMemo(() => new Map(mainItems.map((item) => [item.slot_index, item])), [mainItems]);
@@ -277,7 +278,14 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
 
   async function loadItems() {
     const { data, error } = await supabase.from('inventory_items').select('*').eq('character_id', character.id).order('created_at');
-    if (!error) setItems((data ?? []) as InventoryItemWithLock[]);
+    if (error) return;
+    const loaded = (data ?? []) as InventoryItemWithLock[];
+    if (mayManage && await parkVisibleEquippedItems(supabase, loaded, slotCount)) {
+      const refreshed = await supabase.from('inventory_items').select('*').eq('character_id', character.id).order('created_at');
+      if (!refreshed.error) setItems((refreshed.data ?? []) as InventoryItemWithLock[]);
+      return;
+    }
+    setItems(loaded);
   }
 
   async function loadTransferOptions() {
@@ -639,7 +647,12 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
     await loadItems();
   }
 
-  async function addGlassFlaskAfterUse(consumedItem: InventoryItemWithLock) {
+  async function planGlassFlaskRecovery(consumedItem: InventoryItemWithLock): Promise<
+    | { kind: 'stack'; itemId: string; nextQuantity: number }
+    | { kind: 'slot'; slot: number }
+    | { kind: 'drop' }
+    | Error
+  > {
     const existingFlasks = items.find((item) =>
       item.id !== consumedItem.id
       && item.parent_item_id === null
@@ -648,11 +661,7 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
       && item.item_name.trim().toLowerCase() === GLASS_FLASK_CATALOG_ITEM.name.toLowerCase()
     );
     if (existingFlasks) {
-      const { error } = await supabase
-        .from('inventory_items')
-        .update({ quantity: existingFlasks.quantity + 1, rarity: GLASS_FLASK_CATALOG_ITEM.rarity, item_type: GLASS_FLASK_CATALOG_ITEM.item_type })
-        .eq('id', existingFlasks.id);
-      return error;
+      return { kind: 'stack', itemId: existingFlasks.id, nextQuantity: Math.max(1, Number(existingFlasks.quantity) || 1) + 1 };
     }
 
     const occupied = new Set(
@@ -663,7 +672,19 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
     const freeSlot = Array.from({ length: slotCount }, (_, index) => index).find((slot) => !occupied.has(slot));
     if (freeSlot === undefined) {
       const proceed = window.confirm('No room for the empty glass flask. It will be dropped if you consume this potion. Proceed?');
-      return proceed ? null : new Error('Potion use cancelled.');
+      return proceed ? { kind: 'drop' } : new Error('Potion use cancelled.');
+    }
+    return { kind: 'slot', slot: freeSlot };
+  }
+
+  async function recoverGlassFlask(plan: { kind: 'stack'; itemId: string; nextQuantity: number } | { kind: 'slot'; slot: number } | { kind: 'drop' }) {
+    if (plan.kind === 'drop') return null;
+    if (plan.kind === 'stack') {
+      const { error } = await supabase
+        .from('inventory_items')
+        .update({ quantity: plan.nextQuantity, rarity: GLASS_FLASK_CATALOG_ITEM.rarity, item_type: GLASS_FLASK_CATALOG_ITEM.item_type })
+        .eq('id', plan.itemId);
+      return error;
     }
 
     const { error } = await supabase.from('inventory_items').insert({
@@ -673,7 +694,7 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
       notes: '',
       item_type: GLASS_FLASK_CATALOG_ITEM.item_type,
       rarity: GLASS_FLASK_CATALOG_ITEM.rarity,
-      slot_index: freeSlot,
+      slot_index: plan.slot,
       parent_item_id: null,
       is_storage: false,
       storage_capacity: 0,
@@ -699,10 +720,10 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
       return;
     }
 
-    const flaskError = await addGlassFlaskAfterUse(selectedItem);
-    if (flaskError) {
+    const flaskPlan = await planGlassFlaskRecovery(selectedItem);
+    if (flaskPlan instanceof Error) {
       setBusy(false);
-      setMessage(flaskError.message);
+      setMessage(flaskPlan.message);
       return;
     }
 
@@ -725,9 +746,16 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
 
     setBusy(false);
     if (itemResult.error) return setMessage(itemResult.error.message);
+    const flaskError = await recoverGlassFlask(flaskPlan);
+    if (flaskError) {
+      setMessage(`${selectedItem.item_name} consumed, but the empty flask could not be recovered: ${flaskError.message}`);
+      await loadItems();
+      onCharacterChanged?.();
+      return;
+    }
     const restoreAmountText = effect && Number.isFinite(effect.amount) ? `by ${effect.amount}` : 'to full';
     const restoreText = effect ? ` ${effect.kind === 'hp' ? 'Restored Health' : 'Restored Mana'} ${restoreAmountText}.` : '';
-    setMessage(`${selectedItem.item_name} consumed.${restoreText} Empty glass flask recovered.`);
+    setMessage(`${selectedItem.item_name} consumed.${restoreText}${flaskPlan.kind === 'drop' ? ' Empty glass flask dropped.' : ' Empty glass flask recovered.'}`);
     closeEditor();
     await loadItems();
     onCharacterChanged?.();

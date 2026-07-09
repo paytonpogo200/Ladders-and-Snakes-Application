@@ -184,9 +184,11 @@ alter table public.inventory_items
 alter table public.inventory_items
   add constraint inventory_storage_capacity_valid check (storage_capacity between 0 and 500);
 
+drop index if exists public.inventory_main_slot_unique;
+
 create unique index if not exists inventory_main_slot_unique
 on public.inventory_items(character_id, slot_index)
-where parent_item_id is null and is_storage = false;
+where parent_item_id is null and is_storage = false and equipped = false;
 
 create unique index if not exists inventory_container_slot_unique
 on public.inventory_items(parent_item_id, slot_index)
@@ -408,6 +410,7 @@ begin
     where i.character_id = target_character_id
       and i.parent_item_id is null
       and i.is_storage = false
+      and i.equipped = false
       and i.slot_index = slot
   )
   order by slot
@@ -1147,6 +1150,7 @@ as $$
     where character_id = target_character_id
       and parent_item_id is null
       and is_storage = false
+      and equipped = false
       and slot_index >= 0
   ),
   container_space as (
@@ -2188,6 +2192,7 @@ begin
     where i.character_id = target_character_id
       and i.parent_item_id is null
       and i.is_storage = false
+      and i.equipped = false
       and i.slot_index = slot
   )
   order by slot
@@ -2301,6 +2306,7 @@ begin
   where character_id = moving.character_id
     and id <> moving.id
     and is_storage = false
+    and equipped = false
     and parent_item_id is not distinct from target_parent_item_id
     and slot_index = target_slot_index
   for update;
@@ -3302,6 +3308,7 @@ begin
     where i.character_id = target_character_id
       and i.parent_item_id is null
       and i.is_storage = false
+      and i.equipped = false
       and i.slot_index = slot
   )
   order by slot

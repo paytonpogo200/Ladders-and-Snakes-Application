@@ -12,6 +12,7 @@ import TamedBeastsPanel from '@/components/TamedBeastsPanel';
 import PropertyPanel from '@/components/PropertyPanel';
 import { classAssetToPreset, getClassPreset, type ClassPreset } from '@/lib/classPresets';
 import { formatCurrency, signed } from '@/lib/format';
+import { parkVisibleEquippedItems, parkedLoadoutSlot } from '@/lib/inventoryParking';
 import { rarityClass } from '@/lib/rarity';
 import {
   ATTRIBUTE_KEYS,
@@ -276,7 +277,15 @@ export default function CharacterSheet({
       supabase.from('inventory_items').select('*').eq('character_id', character.id).eq('equipped', true).order('updated_at', { ascending: false }),
       supabase.from('character_properties').select('*').eq('character_id', character.id).order('created_at')
     ]);
-    if (!itemResult.error) setEquipmentItems((itemResult.data ?? []) as InventoryItemWithModifiers[]);
+    if (!itemResult.error) {
+      const loaded = (itemResult.data ?? []) as InventoryItemWithModifiers[];
+      if (await parkVisibleEquippedItems(supabase, loaded, character.inventory_slots ?? 20)) {
+        const refreshed = await supabase.from('inventory_items').select('*').eq('character_id', character.id).eq('equipped', true).order('updated_at', { ascending: false });
+        if (!refreshed.error) setEquipmentItems((refreshed.data ?? []) as InventoryItemWithModifiers[]);
+      } else {
+        setEquipmentItems(loaded);
+      }
+    }
     if (!propertyResult.error) setProperties((propertyResult.data ?? []) as CharacterProperty[]);
   }
 
@@ -312,6 +321,10 @@ export default function CharacterSheet({
 
   async function grantItem() {
     const supabase = createClient();
+    const existingItems = await supabase.from('inventory_items').select('*').eq('character_id', character.id);
+    if (!existingItems.error) {
+      await parkVisibleEquippedItems(supabase, (existingItems.data ?? []) as InventoryItemWithModifiers[], character.inventory_slots ?? 20);
+    }
     const selectedSpell = spells.find((spell) => spell.id === grantForm.imbued_spell_id);
     const itemType = String(grantForm.item_type);
     const isLegendaryWeapon = itemType === 'weapon' && grantForm.legendary_weapon;
@@ -349,7 +362,8 @@ export default function CharacterSheet({
   }
 
   async function equipItemToSlot(itemId: string, slot: LoadoutSlotKey) {
-    const { error } = await createClient().rpc('equip_inventory_item', {
+    const supabase = createClient();
+    const { error } = await supabase.rpc('equip_inventory_item', {
       target_item_id: itemId,
       target_slot: slot
     });
@@ -358,6 +372,11 @@ export default function CharacterSheet({
       setToolMessage(error.message);
       return false;
     }
+
+    await supabase
+      .from('inventory_items')
+      .update({ parent_item_id: null, slot_index: parkedLoadoutSlot(slot, 0, itemId) })
+      .eq('id', itemId);
 
     setToolMessage(`${loadoutSlotLabel(slot)} equipped.`);
     await loadLoadoutStrip();
@@ -431,6 +450,25 @@ export default function CharacterSheet({
     refreshInventoryPanels();
     onSaved();
     return true;
+  }
+
+  async function firstOpenMainInventorySlot(itemId: string) {
+    const supabase = createClient();
+    const { data, error } = await supabase.from('inventory_items').select('*').eq('character_id', character.id);
+    if (error) return { error: error.message, slot: null as number | null };
+
+    const loaded = (data ?? []) as InventoryItemWithModifiers[];
+    await parkVisibleEquippedItems(supabase, loaded, character.inventory_slots ?? 20);
+    const occupied = new Set(
+      loaded
+        .filter((item) => item.id !== itemId && !item.equipped && !item.is_storage && item.parent_item_id === null && item.slot_index >= 0 && item.slot_index < (character.inventory_slots ?? 20))
+        .map((item) => item.slot_index)
+    );
+    const slots = Math.max(0, Math.min(100, character.inventory_slots ?? 20));
+    for (let slot = 0; slot < slots; slot += 1) {
+      if (!occupied.has(slot)) return { error: '', slot };
+    }
+    return { error: 'No open inventory slot to unequip this item.', slot: null as number | null };
   }
 
   function resetLoadoutDrag() {
@@ -533,7 +571,22 @@ export default function CharacterSheet({
   async function unequipLoadoutItem() {
     if (!selectedLoadoutItem) return;
     setLoadoutBusy(true);
-    const { error } = await createClient().rpc('unequip_inventory_item', { target_item_id: selectedLoadoutItem.id });
+    const supabase = createClient();
+    const openSlot = await firstOpenMainInventorySlot(selectedLoadoutItem.id);
+    if (openSlot.error || openSlot.slot === null) {
+      setLoadoutBusy(false);
+      return setToolMessage(openSlot.error || 'No open inventory slot to unequip this item.');
+    }
+    const moveResult = await supabase.rpc('move_inventory_item_slot', {
+      target_item_id: selectedLoadoutItem.id,
+      target_parent_item_id: null,
+      target_slot_index: openSlot.slot
+    });
+    if (moveResult.error) {
+      setLoadoutBusy(false);
+      return setToolMessage(moveResult.error.message);
+    }
+    const { error } = await supabase.rpc('unequip_inventory_item', { target_item_id: selectedLoadoutItem.id });
     setLoadoutBusy(false);
     if (error) return setToolMessage(error.message);
     closeLoadoutEditor();
