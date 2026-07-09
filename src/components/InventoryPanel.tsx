@@ -121,6 +121,18 @@ function canStackItems(source: InventoryItemWithLock, target: InventoryItemWithL
     && stableSpecialSignature(source) === stableSpecialSignature(target);
 }
 
+function canStackDraftWithItem(source: Pick<InventoryItemWithLock, 'item_name' | 'rarity' | 'notes' | 'modifiers' | 'legendary_display_text' | 'storage_capacity' | 'is_storage'>, target: InventoryItemWithLock) {
+  if (source.is_storage || target.is_storage) return false;
+  return normalizeStackName(source.item_name) === normalizeStackName(target.item_name)
+    && normalizeStackRarity(source.rarity) === normalizeStackRarity(target.rarity)
+    && JSON.stringify({
+      notes: String(source.notes ?? '').trim(),
+      modifiers: source.modifiers ?? null,
+      legendary_display_text: String(source.legendary_display_text ?? '').trim(),
+      storage_capacity: Number(source.storage_capacity ?? 0)
+    }) === stableSpecialSignature(target);
+}
+
 function ItemIcon({ type, size = 19 }: { type: InventoryItemType; size?: number }) {
   const Icon = itemTypes.find((entry) => String(entry.value) === String(type))?.icon ?? legacyItemTypes.find((entry) => entry.value === type)?.icon ?? Box;
   return <Icon size={size} />;
@@ -171,6 +183,28 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
   const slotCount = Math.max(0, Math.min(100, character.inventory_slots ?? 20));
   const mainItems = items.filter((item) => item.parent_item_id === null && !item.is_storage && !item.equipped);
   const storageItems = items.filter((item) => item.is_storage);
+  const occupiedSlotKeys = useMemo(() => new Set(items
+    .filter((item) => item.slot_index >= 0 && !item.is_storage)
+    .map((item) => slotKey(item.slot_index, item.parent_item_id))
+  ), [items]);
+  const mainItemBySlot = useMemo(() => new Map(mainItems.map((item) => [item.slot_index, item])), [mainItems]);
+  const storageContentsById = useMemo(() => {
+    const grouped = new Map<string, InventoryItemWithLock[]>();
+    for (const item of items) {
+      if (!item.parent_item_id) continue;
+      const existing = grouped.get(item.parent_item_id) ?? [];
+      existing.push(item);
+      grouped.set(item.parent_item_id, existing);
+    }
+    return grouped;
+  }, [items]);
+  const storageContentSlotMaps = useMemo(() => {
+    const maps = new Map<string, Map<number, InventoryItemWithLock>>();
+    for (const [storageId, contents] of storageContentsById.entries()) {
+      maps.set(storageId, new Map(contents.map((item) => [item.slot_index, item])));
+    }
+    return maps;
+  }, [storageContentsById]);
   const mayManage = profile.role === 'dm' || character.owner_user_id === profile.id;
   const targetCapacity = capacities.find((entry) => entry.character_id === transferTargetId)?.free_slots ?? 0;
   const catalogMatches = useMemo(() => {
@@ -185,6 +219,24 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
 
   function slotKey(slot: number, parentId: string | null) {
     return `${parentId ?? 'main'}:${slot}`;
+  }
+
+  function storageCapacity(parentId: string | null) {
+    if (!parentId) return slotCount;
+    const storage = storageItems.find((item) => item.id === parentId);
+    return Math.max(0, Number(storage?.storage_capacity) || 0);
+  }
+
+  function firstOpenSlot(parentId: string | null, preferredSlot?: number | null) {
+    const capacity = storageCapacity(parentId);
+    if (capacity <= 0) return null;
+    if (typeof preferredSlot === 'number' && preferredSlot >= 0 && preferredSlot < capacity && !occupiedSlotKeys.has(slotKey(preferredSlot, parentId))) {
+      return preferredSlot;
+    }
+    for (let slot = 0; slot < capacity; slot += 1) {
+      if (!occupiedSlotKeys.has(slotKey(slot, parentId))) return slot;
+    }
+    return null;
   }
 
   function setStorageOpen(storageId: string, open: boolean) {
@@ -500,12 +552,47 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
       modifiers: form.modifiers_enabled ? cleanModifierInput(form.modifiers) : {}
     };
 
-    const result = selectedItem
-      ? await supabase.from('inventory_items').update({ ...payload, is_storage: isStorageType, storage_capacity: isStorageType ? Math.max(1, Number(form.storage_capacity) || 1) : 0 }).eq('id', selectedItem.id)
-      : await supabase.from('inventory_items').insert({ ...payload, character_id: character.id, slot_index: emptyTarget?.slot ?? 0, parent_item_id: emptyTarget?.parentId ?? null, is_storage: isStorageType, storage_capacity: isStorageType ? Math.max(1, Number(form.storage_capacity) || 1) : 0 });
+    let result;
+    if (selectedItem) {
+      result = await supabase.from('inventory_items').update({ ...payload, is_storage: isStorageType, storage_capacity: isStorageType ? Math.max(1, Number(form.storage_capacity) || 1) : 0 }).eq('id', selectedItem.id);
+    } else {
+      const parentId = emptyTarget?.parentId ?? null;
+      const draft = {
+        ...payload,
+        is_storage: isStorageType,
+        storage_capacity: isStorageType ? Math.max(1, Number(form.storage_capacity) || 1) : 0
+      };
+      const matchingStack = !isStorageType
+        ? items.find((item) => item.parent_item_id === parentId && !item.equipped && canStackDraftWithItem(draft, item))
+        : null;
+      if (matchingStack) {
+        result = await supabase
+          .from('inventory_items')
+          .update({ quantity: Math.max(1, Number(matchingStack.quantity) || 1) + payload.quantity })
+          .eq('id', matchingStack.id);
+      } else {
+        const targetSlot = firstOpenSlot(parentId, emptyTarget?.slot);
+        if (targetSlot === null) {
+          setBusy(false);
+          setMessage(parentId ? 'That storage container is full.' : 'That inventory is full.');
+          return;
+        }
+        result = await supabase.from('inventory_items').insert({
+          ...draft,
+          character_id: character.id,
+          slot_index: targetSlot,
+          parent_item_id: parentId
+        });
+      }
+    }
 
     setBusy(false);
-    if (result.error) return setMessage(result.error.message);
+    if (result.error) {
+      const friendly = String(result.error.message ?? '').includes('inventory_main_slot_unique')
+        ? 'That slot is already occupied. Try another open slot.'
+        : result.error.message;
+      return setMessage(friendly);
+    }
     closeEditor();
     await loadItems();
   }
@@ -705,13 +792,14 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
       </div>
 
       <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
-        {Array.from({ length: slotCount }, (_, index) => renderSlot(mainItems.find((entry) => entry.slot_index === index), index, null))}
+        {Array.from({ length: slotCount }, (_, index) => renderSlot(mainItemBySlot.get(index), index, null))}
       </div>
 
       {storageItems.length > 0 && (
         <div className="mt-4 space-y-3">
           {storageItems.map((storage) => {
-            const contents = items.filter((item) => item.parent_item_id === storage.id);
+            const contents = storageContentsById.get(storage.id) ?? [];
+            const contentsBySlot = storageContentSlotMaps.get(storage.id) ?? new Map<number, InventoryItemWithLock>();
             const isBagOfHolding = storage.item_name.trim().toLowerCase() === 'bag of holding';
             const highestUsedSlot = contents.reduce((highest, item) => Math.max(highest, item.slot_index), -1);
             const capacity = isBagOfHolding ? Math.max(contents.length + 1, highestUsedSlot + 2, 1) : Math.max(1, storage.storage_capacity);
@@ -726,7 +814,7 @@ export default function InventoryPanel({ character, canEdit, profile, refreshSig
                   </span>
                 </summary>
                 <div className="grid grid-cols-4 gap-2 border-t border-[#d1a85b1f] p-3 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
-                  {Array.from({ length: capacity }, (_, index) => renderSlot(contents.find((entry) => entry.slot_index === index), index, storage.id))}
+                  {Array.from({ length: capacity }, (_, index) => renderSlot(contentsBySlot.get(index), index, storage.id))}
                 </div>
               </details>
             );

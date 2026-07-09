@@ -108,6 +108,7 @@ export default function HousePanel({
 
   const selectedHouseItem = houseItems.find((entry) => entry.id === selectedHouseItemId) ?? null;
   const sourceItem = carriedItems.find((entry) => entry.id === sourceItemId) ?? null;
+  const houseItemBySlot = useMemo(() => new Map(houseItems.map((item) => [item.slot_index, item])), [houseItems]);
 
   function chooseTargetCharacter(characterId: string) {
     setTargetCharacterId(characterId);
@@ -239,7 +240,7 @@ export default function HousePanel({
       <div className="border-t border-[#e0a64e22] p-3">
         <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-10">
           {Array.from({ length: house.capacity }, (_, slot) => {
-            const item = houseItems.find((entry) => entry.slot_index === slot);
+            const item = houseItemBySlot.get(slot);
             return (
               <button
                 key={slot}

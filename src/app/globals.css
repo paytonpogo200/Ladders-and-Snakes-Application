@@ -110,6 +110,8 @@ h3,
     rgba(32, 17, 8, 0.95);
   box-shadow: 0 20px 55px rgba(20, 7, 1, 0.34), inset 0 1px rgba(255, 236, 199, 0.06);
   backdrop-filter: blur(6px) saturate(0.9);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 22rem;
 }
 
 .surface-soft {
